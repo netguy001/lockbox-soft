@@ -1,0 +1,647 @@
+import os
+import json
+import base64
+import secrets
+import zipfile
+import shutil
+from datetime import datetime
+from pathlib import Path
+from .crypto import derive_key, encrypt, decrypt, check_password_strength
+from .constants import EMPTY_VAULT, MAX_PASSWORD_HISTORY, BACKUP_DIR
+
+
+class Vault:
+    def __init__(self, path: str):
+        self.path = Path(path)
+        self.key = None
+        self.salt = None
+        self.data = None
+        self.is_locked = True
+        self.last_activity = None
+
+    def unlock(self, password: str):
+        """Unlock vault with master password"""
+        if not self.path.exists() or self.path.stat().st_size == 0:
+            print("Creating new vault...")
+            self.salt = os.urandom(16)
+            self.key = derive_key(password, self.salt)
+            self.data = EMPTY_VAULT.copy()
+            self.is_locked = False
+            self.last_activity = datetime.now()
+            self._ensure_categories()
+            self._save()
+            print("New vault created successfully!")
+            return
+
+        try:
+            with open(self.path, "rb") as f:
+                self.salt = f.read(16)
+                encrypted = f.read()
+
+            if len(encrypted) == 0:
+                raise ValueError("Vault file is corrupted (empty)")
+
+            self.key = derive_key(password, self.salt)
+            decrypted = decrypt(encrypted, self.key)
+            self.data = json.loads(decrypted.decode())
+
+        except json.JSONDecodeError:
+            raise ValueError("Invalid password or corrupted vault")
+        except Exception as e:
+            raise ValueError(f"Invalid password or corrupted vault: {str(e)}")
+
+        self._ensure_categories()
+        self.is_locked = False
+        self.last_activity = datetime.now()
+
+    def _ensure_categories(self):
+        """Ensure all categories exist in vault data"""
+        for category in [
+            "passwords",
+            "api_keys",
+            "notes",
+            "ssh_keys",
+            "files",
+            "encrypted_folders",
+            "password_history",
+        ]:
+            if category not in self.data:
+                self.data[category] = []
+
+    def lock(self):
+        """Lock the vault and clear sensitive data from memory"""
+        self.key = None
+        self.data = None
+        self.is_locked = True
+        self.last_activity = None
+
+    def _save(self):
+        """Encrypt and save vault to disk"""
+        if self.is_locked:
+            raise ValueError("Vault is locked")
+
+        raw = json.dumps(self.data, indent=2).encode()
+        encrypted = encrypt(raw, self.key)
+
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.path, "wb") as f:
+            f.write(self.salt + encrypted)
+
+        self.last_activity = datetime.now()
+
+    def _check_unlocked(self):
+        """Helper to ensure vault is unlocked"""
+        if self.is_locked or self.key is None:
+            raise ValueError("Vault is locked")
+
+    def _generate_id(self):
+        """Generate unique ID for entries"""
+        return secrets.token_hex(8)
+
+    def change_master_password(self, old_password: str, new_password: str):
+        """Change the master password and re-encrypt vault"""
+        self._check_unlocked()
+
+        try:
+            with open(self.path, "rb") as f:
+                old_salt = f.read(16)
+                encrypted = f.read()
+
+            old_key = derive_key(old_password, old_salt)
+            decrypt(encrypted, old_key)
+        except Exception:
+            raise ValueError("Current password is incorrect")
+
+        self.salt = os.urandom(16)
+        self.key = derive_key(new_password, self.salt)
+        self._save()
+        return True
+
+    # ========== PASSWORD METHODS ==========
+
+    def add_password(
+        self,
+        title: str,
+        username: str,
+        password: str,
+        url: str = "",
+        notes: str = "",
+        tags: list = None,
+    ):
+        """Add a new password entry"""
+        self._check_unlocked()
+        entry = {
+            "id": self._generate_id(),
+            "title": title,
+            "username": username,
+            "password": password,
+            "url": url,
+            "notes": notes,
+            "tags": tags or [],
+            "created": datetime.now().isoformat(),
+            "modified": datetime.now().isoformat(),
+            "favorite": False,
+        }
+        self.data["passwords"].append(entry)
+        self._save()
+        return entry["id"]
+
+    def list_passwords(self):
+        """Get all password entries"""
+        self._check_unlocked()
+        return self.data.get("passwords", [])
+
+    def get_password(self, entry_id: str):
+        """Get specific password entry by ID"""
+        self._check_unlocked()
+        for entry in self.data.get("passwords", []):
+            if entry.get("id") == entry_id:
+                return entry
+        return None
+
+    def update_password(self, entry_id: str, **kwargs):
+        """Update password entry with history tracking"""
+        self._check_unlocked()
+        for entry in self.data.get("passwords", []):
+            if entry.get("id") == entry_id:
+                # Track password history if password changed
+                if "password" in kwargs and kwargs["password"] != entry.get("password"):
+                    self._add_password_history(
+                        entry_id, entry.get("password"), entry.get("title", "Unknown")
+                    )
+
+                entry.update(kwargs)
+                entry["modified"] = datetime.now().isoformat()
+                self._save()
+                return True
+        return False
+
+    def delete_password(self, entry_id: str):
+        """Delete password entry"""
+        self._check_unlocked()
+        self.data["passwords"] = [
+            p for p in self.data.get("passwords", []) if p.get("id") != entry_id
+        ]
+        # Also remove its history
+        self.data["password_history"] = [
+            h
+            for h in self.data.get("password_history", [])
+            if h.get("password_id") != entry_id
+        ]
+        self._save()
+
+    def _add_password_history(self, password_id: str, old_password: str, title: str):
+        """Add password to history"""
+        history_entry = {
+            "id": self._generate_id(),
+            "password_id": password_id,
+            "title": title,
+            "old_password": old_password,
+            "changed_at": datetime.now().isoformat(),
+        }
+
+        if "password_history" not in self.data:
+            self.data["password_history"] = []
+
+        self.data["password_history"].append(history_entry)
+
+        # Keep only last MAX_PASSWORD_HISTORY entries per password
+        password_histories = [
+            h for h in self.data["password_history"] if h["password_id"] == password_id
+        ]
+        if len(password_histories) > MAX_PASSWORD_HISTORY:
+            # Remove oldest
+            password_histories.sort(key=lambda x: x["changed_at"])
+            to_remove = password_histories[0]
+            self.data["password_history"] = [
+                h for h in self.data["password_history"] if h["id"] != to_remove["id"]
+            ]
+
+    def get_password_history(self, password_id: str):
+        """Get password change history"""
+        self._check_unlocked()
+        histories = [
+            h
+            for h in self.data.get("password_history", [])
+            if h["password_id"] == password_id
+        ]
+        histories.sort(key=lambda x: x["changed_at"], reverse=True)
+        return histories
+
+    # ========== BACKUP & RESTORE ==========
+
+    def backup_vault(self, backup_path: str = None):
+        """Create encrypted backup of vault"""
+        self._check_unlocked()
+
+        if backup_path is None:
+            BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_path = BACKUP_DIR / f"lockbox_backup_{timestamp}.vault"
+
+        # Copy current vault file
+        shutil.copy2(self.path, backup_path)
+        return str(backup_path)
+
+    def restore_vault(self, backup_path: str, password: str):
+        """Restore vault from backup"""
+        backup_file = Path(backup_path)
+        if not backup_file.exists():
+            raise ValueError("Backup file not found")
+
+        # Verify backup can be decrypted
+        try:
+            with open(backup_file, "rb") as f:
+                salt = f.read(16)
+                encrypted = f.read()
+
+            key = derive_key(password, salt)
+            decrypted = decrypt(encrypted, key)
+            data = json.loads(decrypted.decode())
+        except Exception:
+            raise ValueError("Invalid backup file or password")
+
+        # Restore
+        shutil.copy2(backup_file, self.path)
+        self.unlock(password)
+        return True
+
+    def export_json(self, export_path: str):
+        """Export vault as unencrypted JSON (WARNING: Insecure)"""
+        self._check_unlocked()
+        with open(export_path, "w") as f:
+            json.dump(self.data, f, indent=2)
+
+    # ========== SECURITY DASHBOARD ==========
+
+    def get_security_report(self):
+        """Generate security dashboard data"""
+        self._check_unlocked()
+
+        passwords = self.data.get("passwords", [])
+        weak_passwords = []
+        reused_passwords = []
+        old_passwords = []
+        password_map = {}
+
+        for pwd_entry in passwords:
+            pwd = pwd_entry.get("password", "")
+            pwd_id = pwd_entry.get("id")
+            title = pwd_entry.get("title", "Unknown")
+
+            # Check strength
+            strength = check_password_strength(pwd)
+            if strength["score"] < 60:
+                weak_passwords.append(
+                    {"id": pwd_id, "title": title, "score": strength["score"]}
+                )
+
+            # Check reuse
+            if pwd in password_map:
+                if pwd not in [r["password"] for r in reused_passwords]:
+                    reused_passwords.append(
+                        {"password": pwd, "used_in": [password_map[pwd], title]}
+                    )
+                else:
+                    for r in reused_passwords:
+                        if r["password"] == pwd:
+                            r["used_in"].append(title)
+            else:
+                password_map[pwd] = title
+
+            # Check age (older than 1 year)
+            modified = pwd_entry.get("modified", pwd_entry.get("created"))
+            if modified:
+                age_days = (datetime.now() - datetime.fromisoformat(modified)).days
+                if age_days > 365:
+                    old_passwords.append(
+                        {"id": pwd_id, "title": title, "age_days": age_days}
+                    )
+
+        return {
+            "total_passwords": len(passwords),
+            "weak_passwords": weak_passwords,
+            "reused_passwords": reused_passwords,
+            "old_passwords": old_passwords,
+            "average_strength": (
+                sum(
+                    [
+                        check_password_strength(p.get("password", ""))["score"]
+                        for p in passwords
+                    ]
+                )
+                / len(passwords)
+                if passwords
+                else 0
+            ),
+        }
+
+    # ========== API KEY METHODS ==========
+
+    def add_api_key(
+        self, service: str, key: str, description: str = "", tags: list = None
+    ):
+        """Add API key"""
+        self._check_unlocked()
+        entry = {
+            "id": self._generate_id(),
+            "service": service,
+            "key": key,
+            "description": description,
+            "tags": tags or [],
+            "created": datetime.now().isoformat(),
+            "modified": datetime.now().isoformat(),
+        }
+        self.data["api_keys"].append(entry)
+        self._save()
+        return entry["id"]
+
+    def list_api_keys(self):
+        """Get all API keys"""
+        self._check_unlocked()
+        return self.data.get("api_keys", [])
+
+    def delete_api_key(self, entry_id: str):
+        """Delete API key"""
+        self._check_unlocked()
+        self.data["api_keys"] = [
+            k for k in self.data.get("api_keys", []) if k.get("id") != entry_id
+        ]
+        self._save()
+
+    def update_api_key(
+        self, entry_id: str, service: str, key: str, description: str = ""
+    ):
+        """Update API key entry"""
+        self._check_unlocked()
+        for entry in self.data.get("api_keys", []):
+            if entry.get("id") == entry_id:
+                entry["service"] = service
+                entry["key"] = key
+                entry["description"] = description
+                entry["modified"] = datetime.now().isoformat()
+                self._save()
+                return True
+        return False
+
+    # ========== SECURE NOTES METHODS ==========
+
+    def add_note(self, title: str, content: str, tags: list = None):
+        """Add secure note"""
+        self._check_unlocked()
+        entry = {
+            "id": self._generate_id(),
+            "title": title,
+            "content": content,
+            "tags": tags or [],
+            "created": datetime.now().isoformat(),
+            "modified": datetime.now().isoformat(),
+        }
+        self.data["notes"].append(entry)
+        self._save()
+        return entry["id"]
+
+    def list_notes(self):
+        """Get all notes"""
+        self._check_unlocked()
+        return self.data.get("notes", [])
+
+    def delete_note(self, entry_id: str):
+        """Delete note"""
+        self._check_unlocked()
+        self.data["notes"] = [
+            n for n in self.data.get("notes", []) if n.get("id") != entry_id
+        ]
+        self._save()
+
+    def update_note(self, entry_id: str, title: str, content: str):
+        """Update note entry"""
+        self._check_unlocked()
+        for entry in self.data.get("notes", []):
+            if entry.get("id") == entry_id:
+                entry["title"] = title
+                entry["content"] = content
+                entry["modified"] = datetime.now().isoformat()
+                self._save()
+                return True
+        return False
+
+    # ========== SSH KEY METHODS ==========
+
+    def add_ssh_key(
+        self,
+        name: str,
+        private_key: str,
+        public_key: str = "",
+        passphrase: str = "",
+        tags: list = None,
+    ):
+        """Add SSH key pair"""
+        self._check_unlocked()
+        entry = {
+            "id": self._generate_id(),
+            "name": name,
+            "private_key": private_key,
+            "public_key": public_key,
+            "passphrase": passphrase,
+            "tags": tags or [],
+            "created": datetime.now().isoformat(),
+            "modified": datetime.now().isoformat(),  # ADDED
+        }
+        self.data["ssh_keys"].append(entry)
+        self._save()
+        return entry["id"]
+
+    def list_ssh_keys(self):
+        """Get all SSH keys"""
+        self._check_unlocked()
+        return self.data.get("ssh_keys", [])
+
+    def delete_ssh_key(self, entry_id: str):
+        """Delete SSH key"""
+        self._check_unlocked()
+        self.data["ssh_keys"] = [
+            k for k in self.data.get("ssh_keys", []) if k.get("id") != entry_id
+        ]
+        self._save()
+
+    def update_ssh_key(
+        self, entry_id: str, name: str, private_key: str, public_key: str = ""
+    ):
+        """Update SSH key entry"""
+        self._check_unlocked()
+        for entry in self.data.get("ssh_keys", []):
+            if entry.get("id") == entry_id:
+                entry["name"] = name
+                entry["private_key"] = private_key
+                entry["public_key"] = public_key
+                entry["modified"] = datetime.now().isoformat()
+                self._save()
+                return True
+        return False
+
+    # ========== FILE METHODS ==========
+
+    def add_file(
+        self, filename: str, file_data: bytes, description: str = "", tags: list = None
+    ):
+        """Add encrypted file"""
+        self._check_unlocked()
+        entry = {
+            "id": self._generate_id(),
+            "filename": filename,
+            "data": base64.b64encode(file_data).decode(),
+            "size": len(file_data),
+            "description": description,
+            "tags": tags or [],
+            "created": datetime.now().isoformat(),
+        }
+        self.data["files"].append(entry)
+        self._save()
+        return entry["id"]
+
+    def list_files(self):
+        """Get all files (metadata only, not data)"""
+        self._check_unlocked()
+        return [
+            {k: v for k, v in f.items() if k != "data"}
+            for f in self.data.get("files", [])
+        ]
+
+    def get_file(self, entry_id: str):
+        """Get file data"""
+        self._check_unlocked()
+        for entry in self.data.get("files", []):
+            if entry.get("id") == entry_id:
+                return base64.b64decode(entry["data"])
+        return None
+
+    def delete_file(self, entry_id: str):
+        """Delete file"""
+        self._check_unlocked()
+        self.data["files"] = [
+            f for f in self.data.get("files", []) if f.get("id") != entry_id
+        ]
+        self._save()
+
+    # ========== FOLDER STORAGE METHODS ==========
+
+    def add_encrypted_folder(self, folder_path: str, description: str = ""):
+        """Store folder metadata for secure tracking"""
+        self._check_unlocked()
+
+        folder_path = Path(folder_path)
+        if not folder_path.exists() or not folder_path.is_dir():
+            raise ValueError("Invalid folder path")
+
+        # Count files and calculate size (fast)
+        file_list = []
+        total_size = 0
+        for file_path in folder_path.rglob("*"):
+            if file_path.is_file():
+                rel_path = str(file_path.relative_to(folder_path))
+                file_list.append(rel_path)
+                total_size += file_path.stat().st_size
+
+        # Store metadata only
+        entry = {
+            "id": self._generate_id(),
+            "folder_name": folder_path.name,
+            "original_path": str(folder_path),
+            "file_list": file_list,
+            "size": total_size,
+            "file_count": len(file_list),
+            "description": description,
+            "created": datetime.now().isoformat(),
+        }
+
+        self.data["encrypted_folders"].append(entry)
+        self._save()
+        return entry["id"]
+
+    def list_encrypted_folders(self):
+        """Get all folder metadata"""
+        self._check_unlocked()
+        return [
+            {k: v for k, v in f.items() if k != "file_list"}
+            for f in self.data.get("encrypted_folders", [])
+        ]
+
+    def download_folder_as_zip(self, entry_id: str, output_zip_path: str):
+        """Create zip from original folder location"""
+        self._check_unlocked()
+
+        for entry in self.data.get("encrypted_folders", []):
+            if entry.get("id") == entry_id:
+                original_path = Path(entry["original_path"])
+
+                if not original_path.exists():
+                    raise ValueError(
+                        "Original folder no longer exists at that location"
+                    )
+
+                # Create zip file
+                with zipfile.ZipFile(
+                    output_zip_path, "w", zipfile.ZIP_DEFLATED
+                ) as zipf:
+                    for file_path in original_path.rglob("*"):
+                        if file_path.is_file():
+                            arcname = file_path.relative_to(original_path.parent)
+                            zipf.write(file_path, arcname)
+
+                return True
+
+        return False
+
+    def set_folder_password(self, entry_id: str, password: str):
+        """Set password protection for folder ZIP downloads"""
+        self._check_unlocked()
+        for entry in self.data.get("encrypted_folders", []):
+            if entry.get("id") == entry_id:
+                entry["zip_password"] = password
+                self._save()
+                return True
+        return False
+
+    def delete_encrypted_folder(self, entry_id: str):
+        """Delete folder metadata"""
+        self._check_unlocked()
+        self.data["encrypted_folders"] = [
+            f for f in self.data.get("encrypted_folders", []) if f.get("id") != entry_id
+        ]
+        self._save()
+
+    # ========== SEARCH & UTILITY ==========
+
+    def search(self, query: str, category: str = "all"):
+        """Search across all entries"""
+        self._check_unlocked()
+        query = query.lower()
+        results = []
+
+        categories = (
+            ["passwords", "api_keys", "notes", "ssh_keys", "files", "encrypted_folders"]
+            if category == "all"
+            else [category]
+        )
+
+        for cat in categories:
+            for entry in self.data.get(cat, []):
+                searchable = json.dumps(entry).lower()
+                if query in searchable:
+                    results.append({"category": cat, "entry": entry})
+
+        return results
+
+    def get_vault_stats(self):
+        """Get vault statistics"""
+        self._check_unlocked()
+        return {
+            "passwords": len(self.data.get("passwords", [])),
+            "api_keys": len(self.data.get("api_keys", [])),
+            "notes": len(self.data.get("notes", [])),
+            "ssh_keys": len(self.data.get("ssh_keys", [])),
+            "files": len(self.data.get("files", [])),
+            "encrypted_folders": len(self.data.get("encrypted_folders", [])),
+            "total": sum(len(v) for v in self.data.values() if isinstance(v, list)),
+        }

@@ -10,6 +10,7 @@ from PIL import Image
 from .vault import Vault
 from .crypto import generate_password, check_password_strength
 from .constants import COLORS, AUTO_LOCK_MINUTES, CLIPBOARD_CLEAR_SECONDS, VAULT_FILE
+from .qr_share import QRShare
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -28,6 +29,7 @@ class LockBoxUI:
 
     def __init__(self):
         self.vault = Vault(str(VAULT_FILE))
+        self.qr_share = QRShare()
         self.app = ctk.CTk()
         self.logo_photo = None
 
@@ -589,60 +591,62 @@ class LockBoxUI:
 
         # Search bar container (hidden by default)
         if self.current_category not in ["security", "bulk_delete"]:
-    # Search bar container (hidden by default)
-         if self.current_category not in ["security", "bulk_delete"]:
-            # CRITICAL FIX: Properly cleanup old StringVar
-            if hasattr(self, "search_var") and self.search_var is not None:
-                try:
-                    traces = self.search_var.trace_info()
-                    for trace in traces:
-                        self.search_var.trace_remove(trace[0], trace[1])
-                except:
-                    pass
-                self.search_var = None
+            # Search bar container (hidden by default)
+            if self.current_category not in ["security", "bulk_delete"]:
+                # CRITICAL FIX: Properly cleanup old StringVar
+                if hasattr(self, "search_var") and self.search_var is not None:
+                    try:
+                        traces = self.search_var.trace_info()
+                        for trace in traces:
+                            self.search_var.trace_remove(trace[0], trace[1])
+                    except:
+                        pass
+                    self.search_var = None
 
-            # Create fresh StringVar AFTER cleanup
-            self.search_var = tk.StringVar()
+                # Create fresh StringVar AFTER cleanup
+                self.search_var = tk.StringVar()
 
-            self.search_container = ctk.CTkFrame(
-                self.content_area,
-                fg_color=COLORS["bg_card"],
-                corner_radius=10,
-                height=50,
-                border_width=1,
-                border_color=COLORS["bg_secondary"],
-            )
+                self.search_container = ctk.CTkFrame(
+                    self.content_area,
+                    fg_color=COLORS["bg_card"],
+                    corner_radius=10,
+                    height=50,
+                    border_width=1,
+                    border_color=COLORS["bg_secondary"],
+                )
 
-            ctk.CTkLabel(self.search_container, text="🔍", font=("Segoe UI", 16)).pack(
-                side="left", padx=(15, 5)
-            )
+                ctk.CTkLabel(
+                    self.search_container, text="🔍", font=("Segoe UI", 16)
+                ).pack(side="left", padx=(15, 5))
 
-            self.search_entry = ctk.CTkEntry(
-                self.search_container,
-                textvariable=self.search_var,
-                height=40,
-                placeholder_text=f"Search {self.current_category.replace('_', ' ')}...",
-                font=("Segoe UI", 13),
-                border_width=0,
-                fg_color="transparent",
-            )
-            self.search_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
-            self.search_entry.bind("<KeyRelease>", lambda e: self.on_search_change())
+                self.search_entry = ctk.CTkEntry(
+                    self.search_container,
+                    textvariable=self.search_var,
+                    height=40,
+                    placeholder_text=f"Search {self.current_category.replace('_', ' ')}...",
+                    font=("Segoe UI", 13),
+                    border_width=0,
+                    fg_color="transparent",
+                )
+                self.search_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+                self.search_entry.bind(
+                    "<KeyRelease>", lambda e: self.on_search_change()
+                )
 
-            self.search_close_btn = ctk.CTkButton(
-                self.search_container,
-                text="✕",
-                width=35,
-                height=35,
-                font=("Segoe UI", 16, "bold"),
-                fg_color="transparent",
-                hover_color=COLORS["danger"],
-                corner_radius=6,
-                command=self.close_search,
-            )
-            self.search_close_btn.pack(side="right", padx=(5, 10))
+                self.search_close_btn = ctk.CTkButton(
+                    self.search_container,
+                    text="✕",
+                    width=35,
+                    height=35,
+                    font=("Segoe UI", 16, "bold"),
+                    fg_color="transparent",
+                    hover_color=COLORS["danger"],
+                    corner_radius=6,
+                    command=self.close_search,
+                )
+                self.search_close_btn.pack(side="right", padx=(5, 10))
 
-            self.search_visible = False
+                self.search_visible = False
         # Items container
         self.items_container = ctk.CTkScrollableFrame(
             self.content_area, fg_color="transparent"
@@ -909,6 +913,17 @@ class LockBoxUI:
                     p, "Password"
                 ),
             ).pack(side="left", padx=(5, 8))
+            # QR CODE BUTTON (ADD THIS)
+            ctk.CTkButton(
+                actions,
+                text="📱 QR",
+                width=70,
+                height=32,
+                fg_color="gray30",
+                hover_color="gray40",
+                corner_radius=6,
+                command=lambda i=item: self.show_password_qr(i),
+            ).pack(side="left", padx=(0, 8))
             # ADD THIS NEW BUTTON - Breach Check
             ctk.CTkButton(
                 actions,
@@ -1042,7 +1057,16 @@ class LockBoxUI:
                 corner_radius=6,
                 command=lambda k=item["key"]: self.copy_to_clipboard(k, "API Key"),
             ).pack(side="left", padx=(5, 8))
-
+            ctk.CTkButton(
+                actions,
+                text="📱 QR",
+                width=70,
+                height=32,
+                fg_color="gray30",
+                hover_color="gray40",
+                corner_radius=6,
+                command=lambda i=item: self.show_api_key_qr(i),
+            ).pack(side="left", padx=(0, 8))
             # EDIT BUTTON (NEW)
             ctk.CTkButton(
                 actions,
@@ -1193,7 +1217,16 @@ class LockBoxUI:
                 corner_radius=6,
                 command=lambda n=item: self.view_note(n),
             ).pack(side="left", padx=(5, 8))
-
+            ctk.CTkButton(
+                actions,
+                text="📱 QR",
+                width=70,
+                height=32,
+                fg_color="gray30",
+                hover_color="gray40",
+                corner_radius=6,
+                command=lambda i=item: self.show_note_qr(i),
+            ).pack(side="left", padx=(0, 8))
             # EDIT BUTTON (NEW)
             ctk.CTkButton(
                 actions,
@@ -1285,7 +1318,16 @@ class LockBoxUI:
                         k, "Public SSH Key"
                     ),
                 ).pack(side="left", padx=(0, 8))
-
+            ctk.CTkButton(
+                actions,
+                text="📱 QR",
+                width=70,
+                height=32,
+                fg_color="gray30",
+                hover_color="gray40",
+                corner_radius=6,
+                command=lambda i=item: self.show_ssh_key_qr(i),
+            ).pack(side="left", padx=(0, 8))
             # EDIT BUTTON (NEW)
             ctk.CTkButton(
                 actions,
@@ -4632,6 +4674,137 @@ Try again later.
             corner_radius=8,
             command=attempt_recovery,
         ).pack(side="left", padx=10)
+
+    def show_qr_code(self, qr_image, title: str, data_type: str):
+        """Display QR code in popup"""
+        dialog = self.create_dialog(f"📱 QR Code - {title}", 500, 650)
+
+        ctk.CTkLabel(
+            dialog, text=f"Scan with Phone Camera", font=("Segoe UI", 20, "bold")
+        ).pack(pady=(20, 5))
+
+        ctk.CTkLabel(
+            dialog,
+            text=f"{data_type}: {title}",
+            font=("Segoe UI", 14),
+            text_color=COLORS["accent"],
+        ).pack(pady=(0, 15))
+
+        # Convert PIL image to CTkImage (FIX FOR WARNING)
+        qr_image_resized = qr_image.resize((350, 350))
+        ctk_image = ctk.CTkImage(
+            light_image=qr_image_resized, dark_image=qr_image_resized, size=(350, 350)
+        )
+
+        # QR code display
+        qr_frame = ctk.CTkFrame(dialog, fg_color=COLORS["bg_card"], corner_radius=10)
+        qr_frame.pack(pady=10, padx=20, ipady=20, ipadx=20)
+
+        qr_label = ctk.CTkLabel(qr_frame, image=ctk_image, text="")
+        qr_label.image = ctk_image  # Keep reference
+        qr_label.pack()
+
+        # Instructions
+        instructions_frame = ctk.CTkFrame(
+            dialog, fg_color=COLORS["bg_card"], corner_radius=10
+        )
+        instructions_frame.pack(pady=15, padx=20, fill="x", ipady=10)
+
+        instructions = [
+            "1. Open camera app on your phone",
+            "2. Point at QR code above",
+            "3. Tap the text to select and copy",
+            "4. Paste in any app/website",
+        ]
+
+        for instruction in instructions:
+            ctk.CTkLabel(
+                instructions_frame,
+                text=instruction,
+                font=("Segoe UI", 11),
+                text_color=COLORS["text_secondary"],
+                anchor="w",
+            ).pack(anchor="w", padx=15, pady=2)
+
+        # Countdown timer
+        countdown_label = ctk.CTkLabel(
+            dialog,
+            text="⏱️ Expires in: 60 seconds",
+            font=("Segoe UI", 12, "bold"),
+            text_color=COLORS["warning"],
+        )
+        countdown_label.pack(pady=10)
+
+        # Auto-close countdown
+        remaining = [60]
+
+        def update_countdown():
+            remaining[0] -= 1
+            if remaining[0] <= 0:
+                dialog.destroy()
+                return
+
+            color = COLORS["danger"] if remaining[0] <= 10 else COLORS["warning"]
+            countdown_label.configure(
+                text=f"⏱️ Expires in: {remaining[0]} seconds", text_color=color
+            )
+            dialog.after(1000, update_countdown)
+
+        update_countdown()
+
+        ctk.CTkButton(
+            dialog,
+            text="Close",
+            width=200,
+            height=40,
+            font=("Segoe UI", 12),
+            fg_color="gray30",
+            hover_color="gray40",
+            command=dialog.destroy,
+        ).pack(pady=20)
+
+    def show_password_qr(self, item):
+        """Generate and show QR for password"""
+        try:
+            qr_image = self.qr_share.create_password_qr(
+                title=item.get("title", "Password"),
+                username=item.get("username", ""),
+                password=item.get("password", ""),
+            )
+            self.show_qr_code(qr_image, item.get("title", "Password"), "Password")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to generate QR code: {str(e)}")
+
+    def show_api_key_qr(self, item):
+        """Generate and show QR for API key"""
+        try:
+            qr_image = self.qr_share.create_api_key_qr(
+                service=item.get("service", "API Key"), key=item.get("key", "")
+            )
+            self.show_qr_code(qr_image, item.get("service", "API Key"), "API Key")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to generate QR code: {str(e)}")
+
+    def show_ssh_key_qr(self, item):
+        """Generate and show QR for SSH key"""
+        try:
+            qr_image = self.qr_share.create_ssh_key_qr(
+                name=item.get("name", "SSH Key"),
+                private_key=item.get("private_key", ""),
+            )
+            self.show_qr_code(qr_image, item.get("name", "SSH Key"), "SSH Key")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to generate QR code: {str(e)}")
+
+    def show_note_qr(self, item):
+        """Generate and show QR for note"""
+        try:
+            qr_image = self.qr_share.create_note_qr(
+                title=item.get("title", "Note"), content=item.get("content", "")
+            )
+            self.show_qr_code(qr_image, item.get("title", "Note"), "Secure Note")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to generate QR code: {str(e)}")
 
 
 # THIS SHOULD BE AT THE VERY END - OUTSIDE THE CLASS

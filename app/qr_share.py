@@ -36,30 +36,35 @@ class QRShare:
         return img
 
     def create_password_qr(self, title: str, username: str, password: str):
-        """Create QR for password entry - human readable format"""
+        """Create QR for password entry - MOBILE FRIENDLY FORMAT"""
         readable_text = f"""🔐 LOCKBOX PASSWORD
 
 ━━━━━━━━━━━━━━━━━━━━━
-Title: {title}
+📌 {title}
 ━━━━━━━━━━━━━━━━━━━━━
 
 👤 USERNAME:
+
 {username}
 
+━━━━━━━━━━━━━━━━━━━━━
+
 🔑 PASSWORD:
+
 {password}
 
 ━━━━━━━━━━━━━━━━━━━━━
-⏱️ Expires in: 60 seconds
 
-💡 TIP: Tap and hold text above
-   to copy username or password!
-━━━━━━━━━━━━━━━━━━━━━"""
+💡 TIP: Tap and hold on the
+   username or password above
+   to copy just that field!
+
+⏱️ Expires in 60 seconds"""
 
         return self.generate_qr_image(readable_text)
 
     def create_api_key_qr(self, service: str, key: str):
-        """Create QR for API key - human readable"""
+        """Create QR for API key - MOBILE FRIENDLY"""
         readable_text = f"""🔑 LOCKBOX API KEY
 
 ━━━━━━━━━━━━━━━━━━━━━
@@ -67,19 +72,20 @@ Service: {service}
 ━━━━━━━━━━━━━━━━━━━━━
 
 🔐 API KEY:
+
 {key}
 
 ━━━━━━━━━━━━━━━━━━━━━
-⏱️ Expires in: 60 seconds
 
-💡 TIP: Tap and hold key above
-   to copy it to clipboard!
-━━━━━━━━━━━━━━━━━━━━━"""
+💡 TIP: Tap and hold the key
+   above to copy it!
+
+⏱️ Expires in 60 seconds"""
 
         return self.generate_qr_image(readable_text)
 
     def create_note_qr(self, title: str, content: str):
-        """Create QR for secure note - human readable"""
+        """Create QR for secure note - MOBILE FRIENDLY"""
         # Truncate long notes for QR code (max 500 chars)
         if len(content) > 500:
             preview = content[:497] + "..."
@@ -93,18 +99,20 @@ Title: {title}
 ━━━━━━━━━━━━━━━━━━━━━
 
 📄 CONTENT:
+
 {preview}
 
 ━━━━━━━━━━━━━━━━━━━━━
-⏱️ Expires in: 60 seconds
 
-💡 TIP: Tap and hold to copy!
-━━━━━━━━━━━━━━━━━━━━━"""
+💡 TIP: Tap and hold content
+   above to copy it!
+
+⏱️ Expires in 60 seconds"""
 
         return self.generate_qr_image(readable_text)
 
     def create_ssh_key_qr(self, name: str, private_key: str):
-        """Create QR for SSH key - human readable"""
+        """Create QR for SSH key - MOBILE FRIENDLY"""
         # Truncate very long keys
         if len(private_key) > 800:
             key_preview = private_key[:797] + "..."
@@ -120,13 +128,15 @@ Name: {name}
 ━━━━━━━━━━━━━━━━━━━━━
 
 🔐 PRIVATE KEY:
+
 {key_preview}{warning}
 
 ━━━━━━━━━━━━━━━━━━━━━
-⏱️ Expires in: 60 seconds
 
-💡 TIP: Tap and hold to copy!
-━━━━━━━━━━━━━━━━━━━━━"""
+💡 TIP: Tap and hold the key
+   above to copy it!
+
+⏱️ Expires in 60 seconds"""
 
         return self.generate_qr_image(readable_text)
 

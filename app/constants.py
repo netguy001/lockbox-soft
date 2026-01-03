@@ -18,11 +18,12 @@ EMPTY_VAULT = {
     "files": [],
     "encrypted_folders": [],
     "password_history": [],
+    "totp_codes": [],  # ADD THIS LINE
 }
 
 # Security settings
-AUTO_LOCK_MINUTES = 15
-CLIPBOARD_CLEAR_SECONDS = 30
+AUTO_LOCK_MINUTES = 10
+CLIPBOARD_CLEAR_SECONDS = 15
 MIN_PASSWORD_LENGTH = 8
 MAX_PASSWORD_HISTORY = 10
 PASSWORD_STRENGTH_THRESHOLD = 60

@@ -136,3 +136,39 @@ def hash_for_verification(data: str) -> str:
     h = hashes.Hash(hashes.SHA256())
     h.update(data.encode())
     return h.finalize().hex()
+
+
+def check_password_breach(password: str) -> dict:
+    """Check if password has been breached using Have I Been Pwned API (k-anonymity)"""
+    import hashlib
+    import requests
+
+    # SHA-1 hash of password
+    sha1 = hashlib.sha1(password.encode()).hexdigest().upper()
+    prefix = sha1[:5]
+    suffix = sha1[5:]
+
+    try:
+        # Use k-anonymity model - only send first 5 chars
+        response = requests.get(
+            f"https://api.pwnedpasswords.com/range/{prefix}", timeout=3
+        )
+
+        if response.status_code == 200:
+            hashes = response.text.split("\r\n")
+            for hash_line in hashes:
+                hash_suffix, count = hash_line.split(":")
+                if hash_suffix == suffix:
+                    return {
+                        "breached": True,
+                        "count": int(count),
+                        "message": f"⚠️ Password found in {count} data breaches!",
+                    }
+
+            return {
+                "breached": False,
+                "count": 0,
+                "message": "✅ Password not found in known breaches",
+            }
+    except Exception as e:
+        return {"breached": None, "count": 0, "message": f"Could not check: {str(e)}"}

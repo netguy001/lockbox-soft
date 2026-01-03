@@ -21,18 +21,42 @@ class Vault:
 
     def unlock(self, password: str):
         """Unlock vault with master password"""
+        # ============ SECURITY CHECK ============
+        from .security import SecurityManager
+        from .constants import DATA_DIR
+
+        security = SecurityManager(DATA_DIR / "security.json")
+
+        # Check if locked out
+        locked, minutes = security.is_locked_out()
+        if locked:
+            raise ValueError(f"🔒 Too many attempts. Try again in {minutes} minutes.")
+        # ============ END SECURITY CHECK ============
+
+        # Check if vault exists
         if not self.path.exists() or self.path.stat().st_size == 0:
             print("Creating new vault...")
             self.salt = os.urandom(16)
             self.key = derive_key(password, self.salt)
             self.data = EMPTY_VAULT.copy()
+
+            # Generate recovery phrase for new vault
+            from .recovery import RecoverySystem
+
+            recovery = RecoverySystem(self.path)
+            self.recovery_phrase = recovery.generate_recovery_phrase()
+            recovery.save_recovery_hash(self.recovery_phrase)
+            self.show_recovery_phrase = True
+
             self.is_locked = False
             self.last_activity = datetime.now()
             self._ensure_categories()
             self._save()
+            security.record_successful_login()
             print("New vault created successfully!")
             return
 
+        # Try to unlock existing vault
         try:
             with open(self.path, "rb") as f:
                 self.salt = f.read(16)
@@ -46,13 +70,88 @@ class Vault:
             self.data = json.loads(decrypted.decode())
 
         except json.JSONDecodeError:
-            raise ValueError("Invalid password or corrupted vault")
+            # Wrong password!
+            remaining = security.record_failed_login()
+            if remaining > 0:
+                raise ValueError(
+                    f"❌ Invalid password. {remaining} attempts remaining."
+                )
+            else:
+                raise ValueError(
+                    f"🔒 Too many failed attempts. Account locked for 30 minutes."
+                )
+
         except Exception as e:
-            raise ValueError(f"Invalid password or corrupted vault: {str(e)}")
+            # Wrong password or other error
+            remaining = security.record_failed_login()
+            if remaining > 0:
+                raise ValueError(
+                    f"❌ Invalid password. {remaining} attempts remaining."
+                )
+            else:
+                raise ValueError(
+                    f"🔒 Too many failed attempts. Account locked for 30 minutes."
+                )
+
+        # Success! Unlock vault
+        self._ensure_categories()
+        self.is_locked = False
+        self.last_activity = datetime.now()
+        security.record_successful_login()  # Reset failed attempts
+
+    def unlock_with_recovery(self, recovery_phrase: str):
+        """Unlock vault using recovery phrase instead of password"""
+        from .recovery import RecoverySystem
+
+        recovery = RecoverySystem(self.path)
+
+        if not recovery.has_recovery_phrase():
+            raise ValueError("No recovery phrase set for this vault")
+
+        if not recovery.verify_recovery_phrase(recovery_phrase):
+            raise ValueError("Invalid recovery phrase")
+
+        # Load vault
+        with open(self.path, "rb") as f:
+            self.salt = f.read(16)
+            encrypted = f.read()
+
+        # Derive key from recovery phrase
+        self.key = recovery.phrase_to_key(recovery_phrase, self.salt)
+
+        try:
+            decrypted = decrypt(encrypted, self.key)
+            self.data = json.loads(decrypted.decode())
+        except:
+            raise ValueError("Recovery phrase doesn't match this vault")
 
         self._ensure_categories()
         self.is_locked = False
         self.last_activity = datetime.now()
+        return True
+
+    def _create_verification_hash(self, password: str) -> str:
+        """Create a verification hash for password checking"""
+        from .crypto import hash_for_verification
+
+        return hash_for_verification(password + self.salt.hex())
+
+    def verify_password(self, password: str) -> bool:
+        """Verify password without full decryption"""
+        if not self.path.exists():
+            return False
+
+        try:
+            with open(self.path, "rb") as f:
+                self.salt = f.read(16)
+                encrypted = f.read()
+
+            # Try to decrypt - if it works, password is correct
+            key = derive_key(password, self.salt)
+            decrypt(encrypted, key)
+            return True
+        except:
+            return False
 
     def _ensure_categories(self):
         """Ensure all categories exist in vault data"""
@@ -64,6 +163,7 @@ class Vault:
             "files",
             "encrypted_folders",
             "password_history",
+            "totp_codes",  # ADD THIS LINE
         ]:
             if category not in self.data:
                 self.data[category] = []
@@ -76,16 +176,37 @@ class Vault:
         self.last_activity = None
 
     def _save(self):
-        """Encrypt and save vault to disk"""
+        """Encrypt and save vault to disk with auto-backup"""
         if self.is_locked:
             raise ValueError("Vault is locked")
+
+        # Create auto-backup before saving (keep last 5 backups)
+        if self.path.exists() and self.path.stat().st_size > 0:
+            try:
+                backup_dir = self.path.parent / "backups" / "auto"
+                backup_dir.mkdir(parents=True, exist_ok=True)
+
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                backup_path = backup_dir / f"auto_backup_{timestamp}.vault"
+
+                # Copy current vault before overwriting
+                shutil.copy2(self.path, backup_path)
+
+                # Keep only last 5 auto-backups
+                backups = sorted(backup_dir.glob("auto_backup_*.vault"))
+                if len(backups) > 5:
+                    for old_backup in backups[:-5]:
+                        old_backup.unlink()
+            except Exception as e:
+                print(f"Warning: Auto-backup failed: {e}")
 
         raw = json.dumps(self.data, indent=2).encode()
         encrypted = encrypt(raw, self.key)
 
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.path, "wb") as f:
-            f.write(self.salt + encrypted)
+        # Use atomic save from storage module
+        from .storage import save_vault
+
+        save_vault(self.salt + encrypted)
 
         self.last_activity = datetime.now()
 
@@ -273,6 +394,52 @@ class Vault:
             json.dump(self.data, f, indent=2)
 
     # ========== SECURITY DASHBOARD ==========
+    def import_from_csv(self, csv_path: str):
+        """Import passwords from CSV (format: title,username,password,url,notes)"""
+        self._check_unlocked()
+        import csv
+
+        imported = 0
+        with open(csv_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    self.add_password(
+                        title=row.get("title", row.get("name", "Imported")),
+                        username=row.get("username", row.get("login", "")),
+                        password=row.get("password", ""),
+                        url=row.get("url", row.get("website", "")),
+                        notes=row.get("notes", row.get("note", "")),
+                    )
+                    imported += 1
+                except Exception as e:
+                    print(f"Failed to import row: {e}")
+
+        return imported
+
+    def export_to_csv(self, csv_path: str):
+        """Export passwords to CSV"""
+        self._check_unlocked()
+        import csv
+
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=["title", "username", "password", "url", "notes", "created"],
+            )
+            writer.writeheader()
+
+            for pwd in self.data.get("passwords", []):
+                writer.writerow(
+                    {
+                        "title": pwd.get("title", ""),
+                        "username": pwd.get("username", ""),
+                        "password": pwd.get("password", ""),
+                        "url": pwd.get("url", ""),
+                        "notes": pwd.get("notes", ""),
+                        "created": pwd.get("created", ""),
+                    }
+                )
 
     def get_security_report(self):
         """Generate security dashboard data"""
@@ -480,6 +647,55 @@ class Vault:
                 return True
         return False
 
+    # ========== TOTP/2FA METHODS ==========
+
+    def add_totp(self, name: str, secret: str, issuer: str = "", tags: list = None):
+        """Add TOTP/2FA authenticator"""
+        self._check_unlocked()
+
+        if "totp_codes" not in self.data:
+            self.data["totp_codes"] = []
+
+        entry = {
+            "id": self._generate_id(),
+            "name": name,
+            "secret": secret,
+            "issuer": issuer,
+            "tags": tags or [],
+            "created": datetime.now().isoformat(),
+        }
+        self.data["totp_codes"].append(entry)
+        self._save()
+        return entry["id"]
+
+    def list_totp(self):
+        """Get all TOTP codes"""
+        self._check_unlocked()
+        return self.data.get("totp_codes", [])
+
+    def get_totp_code(self, entry_id: str):
+        """Generate current TOTP code"""
+        self._check_unlocked()
+        import pyotp
+
+        for entry in self.data.get("totp_codes", []):
+            if entry.get("id") == entry_id:
+                totp = pyotp.TOTP(entry["secret"])
+                return {
+                    "code": totp.now(),
+                    "remaining": 30 - (int(datetime.now().timestamp()) % 30),
+                    "name": entry.get("name"),
+                }
+        return None
+
+    def delete_totp(self, entry_id: str):
+        """Delete TOTP entry"""
+        self._check_unlocked()
+        self.data["totp_codes"] = [
+            t for t in self.data.get("totp_codes", []) if t.get("id") != entry_id
+        ]
+        self._save()
+
     # ========== FILE METHODS ==========
 
     def add_file(
@@ -643,5 +859,6 @@ class Vault:
             "ssh_keys": len(self.data.get("ssh_keys", [])),
             "files": len(self.data.get("files", [])),
             "encrypted_folders": len(self.data.get("encrypted_folders", [])),
+            "totp_codes": len(self.data.get("totp_codes", [])),  # ADD THIS LINE
             "total": sum(len(v) for v in self.data.values() if isinstance(v, list)),
         }

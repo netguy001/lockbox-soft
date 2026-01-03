@@ -25,6 +25,7 @@ def get_resource_path(relative_path):
 
 
 class LockBoxUI:
+
     def __init__(self):
         self.vault = Vault(str(VAULT_FILE))
         self.app = ctk.CTk()
@@ -51,8 +52,37 @@ class LockBoxUI:
         self.current_category = "passwords"
         self.clipboard_timer = None
         self.auto_lock_timer = None
-        self.sort_by = "created_desc"  # NEW: Default sort
+        self.sort_by = "created_desc"
+        self.search_var = None  # Initialize here to prevent memory leak
+
         self.show_login()
+        self.setup_keyboard_shortcuts()
+
+    def setup_keyboard_shortcuts(self):
+        """Setup global keyboard shortcuts"""
+        self.app.bind("<Control-l>", lambda e: self.lock_vault())
+        self.app.bind(
+            "<Control-f>",
+            lambda e: self.toggle_search() if hasattr(self, "search_btn") else None,
+        )
+        self.app.bind(
+            "<Control-n>",
+            lambda e: (
+                self.show_add_dialog()
+                if self.current_category not in ["security", "bulk_delete"]
+                else None
+            ),
+        )
+        self.app.bind("<Control-b>", lambda e: self.show_backup_dialog())
+        self.app.bind("<Control-q>", lambda e: self.app.quit())
+        self.app.bind(
+            "<Escape>",
+            lambda e: (
+                self.close_search()
+                if hasattr(self, "search_visible") and self.search_visible
+                else None
+            ),
+        )
 
     def create_dialog(self, title, width, height):
         """Create a dialog window"""
@@ -73,6 +103,39 @@ class LockBoxUI:
     def run(self):
         """Start the application"""
         self.app.mainloop()
+
+    def setup_keyboard_shortcuts(self):
+        """Setup global keyboard shortcuts"""
+        self.app.bind(
+            "<Control-l>",
+            lambda e: self.lock_vault() if not self.vault.is_locked else None,
+        )
+        self.app.bind(
+            "<Control-f>",
+            lambda e: self.toggle_search() if hasattr(self, "search_btn") else None,
+        )
+        self.app.bind(
+            "<Control-n>",
+            lambda e: (
+                self.show_add_dialog()
+                if hasattr(self, "current_category")
+                and self.current_category not in ["security", "bulk_delete"]
+                else None
+            ),
+        )
+        self.app.bind(
+            "<Control-b>",
+            lambda e: self.show_backup_dialog() if not self.vault.is_locked else None,
+        )
+        self.app.bind("<Control-q>", lambda e: self.app.quit())
+        self.app.bind(
+            "<Escape>",
+            lambda e: (
+                self.close_search()
+                if hasattr(self, "search_visible") and self.search_visible
+                else None
+            ),
+        )
 
     def clear(self):
         """Clear all widgets"""
@@ -100,8 +163,14 @@ class LockBoxUI:
         """Reset activity timer"""
         self.start_auto_lock_timer()
 
+    def show_vault(self):
+        """Display main vault interface"""
+        self.clear()
+        self.start_auto_lock_timer()
+        self.setup_keyboard_shortcuts()  # ADD THIS LINE
+
     def show_login(self):
-        """Display login screen"""
+        """Display login screen with recovery option"""
         self.clear()
 
         container = ctk.CTkFrame(self.app, fg_color=COLORS["bg_primary"])
@@ -112,7 +181,7 @@ class LockBoxUI:
             fg_color=COLORS["bg_card"],
             corner_radius=22,
             width=480,
-            height=420,
+            height=480,
             border_width=1,
             border_color=COLORS["bg_secondary"],
         )
@@ -181,8 +250,20 @@ class LockBoxUI:
                 if not password:
                     status.configure(text="Enter your master password")
                     return
+
                 self.vault.unlock(password)
-                self.show_vault()
+
+                # Check if new vault - show recovery phrase
+                if (
+                    hasattr(self.vault, "show_recovery_phrase")
+                    and self.vault.show_recovery_phrase
+                ):
+                    self.show_recovery_phrase_setup(self.vault.recovery_phrase)
+                    delattr(self.vault, "show_recovery_phrase")
+                    delattr(self.vault, "recovery_phrase")
+                else:
+                    self.show_vault()
+
             except ValueError as e:
                 status.configure(text=str(e))
             except Exception as e:
@@ -202,6 +283,30 @@ class LockBoxUI:
             corner_radius=10,
             command=unlock,
         ).pack(pady=(15, 10))
+
+        # Recovery button ONLY if recovery phrase exists
+        try:
+            from .recovery import RecoverySystem
+
+            recovery = RecoverySystem(self.vault.path)
+
+            if recovery.has_recovery_phrase():
+                ctk.CTkButton(
+                    login_box,
+                    text="🔑 Forgot Password? Use Recovery Phrase",
+                    width=380,
+                    height=40,
+                    font=("Segoe UI", 12, "bold"),
+                    fg_color="transparent",
+                    hover_color=COLORS["bg_secondary"],
+                    text_color=COLORS["accent"],
+                    border_width=2,
+                    border_color=COLORS["accent"],
+                    corner_radius=10,
+                    command=self.show_recovery_unlock_dialog,
+                ).pack(pady=(5, 10))
+        except Exception as e:
+            print(f"Recovery check failed: {e}")
 
         ctk.CTkLabel(
             login_box,
@@ -233,14 +338,15 @@ class LockBoxUI:
         ).pack(pady=30)
 
         categories = [
-            ("🔑 Passwords", "passwords"),
-            ("🔐 API Keys", "api_keys"),
+            ("🔒 Passwords", "passwords"),
+            ("🔑 API Keys", "api_keys"),
             ("📝 Secure Notes", "notes"),
             ("🗝️ SSH Keys", "ssh_keys"),
+            ("🔐 2FA/TOTP", "totp_codes"),  # ← ADD THIS LINE
             ("📄 Files", "files"),
             ("📁 Folders", "encrypted_folders"),
             ("📊 Security", "security"),
-            ("🗑️ Bulk Delete", "bulk_delete"),  # NEW
+            ("🗑️ Bulk Delete", "bulk_delete"),
         ]
         self.category_buttons = {}
         for label, cat in categories:
@@ -312,7 +418,18 @@ class LockBoxUI:
             corner_radius=8,
             command=self.show_change_master_password,
         ).pack(pady=10, padx=20)
-
+        ctk.CTkButton(
+            sidebar,
+            text="⌨️ Shortcuts",
+            width=210,
+            height=40,
+            font=("Segoe UI", 12, "bold"),
+            fg_color="#3a3a3a",
+            hover_color="#4a4a4a",
+            text_color=COLORS["text_primary"],
+            corner_radius=8,
+            command=self.show_shortcuts_help,
+        ).pack(pady=5, padx=20)
         ctk.CTkButton(
             sidebar,
             text="🔒 Lock Vault",
@@ -340,9 +457,41 @@ class LockBoxUI:
         if self.current_category == category:
             return
 
+        # Cancel TOTP auto-refresh when leaving
+        if hasattr(self, "_totp_timer"):
+            self.app.after_cancel(self._totp_timer)
+            delattr(self, "_totp_timer")
+
+        # Clear TOTP cards cache when switching away
+        if hasattr(self, "_totp_cards"):
+            delattr(self, "_totp_cards")
+
+        # FIX: Properly cleanup search StringVar
+        if hasattr(self, "search_var") and self.search_var is not None:
+            try:
+                traces = self.search_var.trace_info()
+                for trace in traces:
+                    self.search_var.trace_remove(trace[0], trace[1])
+            except:
+                pass
+            self.search_var = None
+
+        # FIX: Destroy search widgets before switching
+        if hasattr(self, "search_entry"):
+            try:
+                self.search_entry.destroy()
+            except:
+                pass
+
+        if hasattr(self, "search_container"):
+            try:
+                self.search_container.destroy()
+            except:
+                pass
+
         self.current_category = category
 
-        # Update buttons immediately
+        # Update buttons
         for c, btn in self.category_buttons.items():
             btn.configure(
                 fg_color=(
@@ -350,9 +499,7 @@ class LockBoxUI:
                 )
             )
 
-        # Single update call before rebuilding
         self.app.update_idletasks()
-
         self.display_category()
 
     def display_category(self):
@@ -369,14 +516,15 @@ class LockBoxUI:
         header.pack(fill="x", padx=20, pady=(20, 10))
 
         category_names = {
-            "passwords": "🔑 Passwords",
-            "api_keys": "🔐 API Keys",
+            "passwords": "🔒 Passwords",
+            "api_keys": "🔑 API Keys",
             "notes": "📝 Secure Notes",
             "ssh_keys": "🗝️ SSH Keys",
+            "totp_codes": "📱 2FA/TOTP Codes",
             "files": "📄 Files",
             "encrypted_folders": "📁 Folders",
             "security": "📊 Security Dashboard",
-            "bulk_delete": "🗑️ Bulk Delete Manager",  # NEW
+            "bulk_delete": "🗑️ Bulk Delete Manager",
         }
 
         ctk.CTkLabel(
@@ -400,7 +548,7 @@ class LockBoxUI:
             )
             self.search_btn.pack(side="right", padx=(10, 0))
 
-        # Sort dropdown (NEW)
+        # Sort dropdown
         if self.current_category not in ["security", "bulk_delete"]:
             sort_options = [
                 "⬇️ Newest First",
@@ -441,6 +589,19 @@ class LockBoxUI:
 
         # Search bar container (hidden by default)
         if self.current_category not in ["security", "bulk_delete"]:
+    # Search bar container (hidden by default)
+         if self.current_category not in ["security", "bulk_delete"]:
+            # CRITICAL FIX: Properly cleanup old StringVar
+            if hasattr(self, "search_var") and self.search_var is not None:
+                try:
+                    traces = self.search_var.trace_info()
+                    for trace in traces:
+                        self.search_var.trace_remove(trace[0], trace[1])
+                except:
+                    pass
+                self.search_var = None
+
+            # Create fresh StringVar AFTER cleanup
             self.search_var = tk.StringVar()
 
             self.search_container = ctk.CTkFrame(
@@ -482,7 +643,6 @@ class LockBoxUI:
             self.search_close_btn.pack(side="right", padx=(5, 10))
 
             self.search_visible = False
-
         # Items container
         self.items_container = ctk.CTkScrollableFrame(
             self.content_area, fg_color="transparent"
@@ -593,6 +753,9 @@ class LockBoxUI:
         elif self.current_category == "ssh_keys":
             items = self.vault.list_ssh_keys()
             display_fn = self.display_ssh_key_items
+        elif self.current_category == "totp_codes":  # ← ADD THIS
+            items = self.vault.list_totp()
+            display_fn = self.display_totp_items
         elif self.current_category == "files":
             items = self.vault.list_files()
             display_fn = self.display_file_items
@@ -745,9 +908,19 @@ class LockBoxUI:
                 command=lambda p=item["password"]: self.copy_to_clipboard(
                     p, "Password"
                 ),
-            ).pack(
-                side="left", padx=(5, 8)
-            )  # Increased left padding
+            ).pack(side="left", padx=(5, 8))
+            # ADD THIS NEW BUTTON - Breach Check
+            ctk.CTkButton(
+                actions,
+                text="🔍 Check",
+                width=90,
+                height=32,
+                fg_color="gray30",
+                hover_color="gray40",
+                corner_radius=6,
+                command=lambda i=item: self.check_password_breach(i),
+            ).pack(side="left", padx=(0, 8))
+            # Increased left padding
 
             ctk.CTkButton(
                 actions,
@@ -892,6 +1065,69 @@ class LockBoxUI:
                 corner_radius=6,
                 command=lambda i=item["id"]: self.delete_item(i, "api_key"),
             ).pack(side="right", padx=(0, 5))
+        # Auto-refresh every 1 second if there are TOTP items
+        if items and self.current_category == "totp_codes":
+            # Cancel previous timer if exists
+            if hasattr(self, "_totp_timer"):
+                self.app.after_cancel(self._totp_timer)
+
+            # Schedule next refresh in 1 second
+            self._totp_timer = self.app.after(1000, self._refresh_totp)
+
+    def _refresh_totp(self):
+        """Auto-refresh TOTP display every second"""
+        # Only refresh if still on TOTP page and unlocked
+        if (
+            hasattr(self, "current_category")
+            and self.current_category == "totp_codes"
+            and not self.vault.is_locked
+            and hasattr(self, "_totp_cards")
+        ):
+            # DON'T rebuild everything - just update the codes!
+            self._update_totp_codes_only()
+
+    def _update_totp_codes_only(self):
+        """Update TOTP codes without rebuilding widgets"""
+        import pyotp
+
+        items = self.vault.list_totp()
+
+        for item in items:
+            item_id = item["id"]
+            if item_id not in self._totp_cards:
+                continue
+
+            card_data = self._totp_cards[item_id]
+
+            try:
+                # Check if widget still exists
+                if not card_data["code_label"].winfo_exists():
+                    continue
+
+                totp = pyotp.TOTP(item["secret"])
+                code = totp.now()
+                remaining = 30 - (int(datetime.now().timestamp()) % 30)
+
+                # Format and update
+                formatted_code = f"{code[:3]} {code[3:]}"
+                card_data["code_label"].configure(text=formatted_code)
+
+                timer_color = COLORS["danger"] if remaining <= 5 else COLORS["success"]
+                card_data["timer_label"].configure(
+                    text=f"⏱️ {remaining}s", text_color=timer_color
+                )
+
+                card_data["copy_btn"].configure(
+                    command=lambda c=code: self.copy_to_clipboard(c, "TOTP Code")
+                )
+            except Exception as e:
+                continue
+
+        # Schedule next update
+        if self.current_category == "totp_codes" and not self.vault.is_locked:
+            if hasattr(self, "_totp_timer"):
+                self.app.after_cancel(self._totp_timer)
+            self._totp_timer = self.app.after(1000, self._refresh_totp)
 
     def display_note_items(self, items):
         """Display secure notes"""
@@ -1240,125 +1476,338 @@ class LockBoxUI:
             ).pack(side="right", padx=(0, 5))
 
     def display_security_dashboard(self):
-        """Display security dashboard"""
+        """Display comprehensive security dashboard"""
         report = self.vault.get_security_report()
 
-        # Overall score card
-        score_card = ctk.CTkFrame(
-            self.items_container, fg_color=COLORS["bg_card"], corner_radius=12
+        # Stats cards
+        stats_row = ctk.CTkFrame(
+            self.items_container, fg_color="transparent", height=120
         )
-        score_card.pack(fill="x", pady=8, ipady=20, ipadx=20)
+        stats_row.pack(fill="x", padx=20, pady=(0, 20))
+        stats_row.pack_propagate(False)
 
+        # Card 1: Total
+        card1 = ctk.CTkFrame(stats_row, fg_color=COLORS["bg_card"], corner_radius=10)
+        card1.pack(side="left", fill="both", expand=True, padx=5)
         ctk.CTkLabel(
-            score_card, text="🛡️ Overall Security Score", font=("Segoe UI", 20, "bold")
-        ).pack(pady=(10, 15))
+            card1,
+            text=str(report["total_passwords"]),
+            font=("Segoe UI", 36, "bold"),
+            text_color=COLORS["accent"],
+        ).pack(pady=(20, 2))
+        ctk.CTkLabel(
+            card1,
+            text="📊 Total",
+            font=("Segoe UI", 12),
+            text_color=COLORS["text_primary"],
+        ).pack(pady=(0, 20))
 
-        avg_strength = report["average_strength"]
-        score_color = (
-            COLORS["success"]
-            if avg_strength >= 80
-            else COLORS["warning"] if avg_strength >= 60 else COLORS["danger"]
+        # Card 2: Weak
+        card2 = ctk.CTkFrame(stats_row, fg_color=COLORS["bg_card"], corner_radius=10)
+        card2.pack(side="left", fill="both", expand=True, padx=5)
+        weak_count = len(report["weak_passwords"])
+        color = COLORS["danger"] if weak_count > 0 else COLORS["success"]
+        ctk.CTkLabel(
+            card2, text=str(weak_count), font=("Segoe UI", 36, "bold"), text_color=color
+        ).pack(pady=(20, 2))
+        ctk.CTkLabel(
+            card2,
+            text="⚠️ Weak",
+            font=("Segoe UI", 12),
+            text_color=COLORS["text_primary"],
+        ).pack(pady=(0, 20))
+
+        # Card 3: Reused
+        card3 = ctk.CTkFrame(stats_row, fg_color=COLORS["bg_card"], corner_radius=10)
+        card3.pack(side="left", fill="both", expand=True, padx=5)
+        reused_count = len(report["reused_passwords"])
+        color = COLORS["danger"] if reused_count > 0 else COLORS["success"]
+        ctk.CTkLabel(
+            card3,
+            text=str(reused_count),
+            font=("Segoe UI", 36, "bold"),
+            text_color=color,
+        ).pack(pady=(20, 2))
+        ctk.CTkLabel(
+            card3,
+            text="🔄 Reused",
+            font=("Segoe UI", 12),
+            text_color=COLORS["text_primary"],
+        ).pack(pady=(0, 20))
+
+        # Card 4: Old
+        card4 = ctk.CTkFrame(stats_row, fg_color=COLORS["bg_card"], corner_radius=10)
+        card4.pack(side="left", fill="both", expand=True, padx=5)
+        old_count = len(report["old_passwords"])
+        color = COLORS["warning"] if old_count > 0 else COLORS["success"]
+        ctk.CTkLabel(
+            card4, text=str(old_count), font=("Segoe UI", 36, "bold"), text_color=color
+        ).pack(pady=(20, 2))
+        ctk.CTkLabel(
+            card4,
+            text="📅 Old (1yr+)",
+            font=("Segoe UI", 12),
+            text_color=COLORS["text_primary"],
+        ).pack(pady=(0, 20))
+
+        # Strength gauge
+        strength_frame = ctk.CTkFrame(
+            self.items_container,
+            fg_color=COLORS["bg_card"],
+            corner_radius=10,
+            height=100,
         )
+        strength_frame.pack(fill="x", padx=20, pady=(0, 20))
+        strength_frame.pack_propagate(False)
 
         ctk.CTkLabel(
-            score_card,
-            text=f"{avg_strength:.0f}/100",
-            font=("Segoe UI", 48, "bold"),
-            text_color=score_color,
-        ).pack(pady=10)
+            strength_frame,
+            text="💪 Average Strength",
+            font=("Segoe UI", 14, "bold"),
+            text_color=COLORS["text_primary"],
+        ).pack(pady=(15, 5))
 
-        # Issues summary
-        issues_frame = ctk.CTkFrame(
-            self.items_container, fg_color=COLORS["bg_card"], corner_radius=12
-        )
-        issues_frame.pack(fill="x", pady=8, ipady=15, ipadx=15)
-
-        ctk.CTkLabel(
-            issues_frame, text="⚠️ Security Issues", font=("Segoe UI", 18, "bold")
-        ).pack(anchor="w", pady=(10, 15))
-
-        stats_row = ctk.CTkFrame(issues_frame, fg_color="transparent")
-        stats_row.pack(fill="x", pady=5)
-
-        ctk.CTkLabel(
-            stats_row,
-            text=f"🔴 Weak Passwords: {len(report['weak_passwords'])}",
-            font=("Segoe UI", 14),
-            text_color=COLORS["danger"],
-        ).pack(side="left", padx=(0, 30))
+        avg_strength = int(report["average_strength"])
+        if avg_strength >= 80:
+            strength_text = "Excellent"
+            strength_color = COLORS["success"]
+        elif avg_strength >= 60:
+            strength_text = "Good"
+            strength_color = COLORS["accent"]
+        elif avg_strength >= 40:
+            strength_text = "Fair"
+            strength_color = COLORS["warning"]
+        else:
+            strength_text = "Weak"
+            strength_color = COLORS["danger"]
 
         ctk.CTkLabel(
-            stats_row,
-            text=f"🟡 Reused Passwords: {len(report['reused_passwords'])}",
-            font=("Segoe UI", 14),
-            text_color=COLORS["warning"],
-        ).pack(side="left", padx=(0, 30))
+            strength_frame,
+            text=f"{avg_strength}% - {strength_text}",
+            font=("Segoe UI", 22, "bold"),
+            text_color=strength_color,
+        ).pack(pady=(0, 15))
 
-        ctk.CTkLabel(
-            stats_row,
-            text=f"🟠 Old Passwords (>1yr): {len(report['old_passwords'])}",
-            font=("Segoe UI", 14),
-            text_color=COLORS["warning"],
-        ).pack(side="left")
+        # NON-SCROLLABLE CONTAINER FOR SECTIONS
+        content_container = ctk.CTkFrame(self.items_container, fg_color="transparent")
+        content_container.pack(fill="both", expand=True, padx=20, pady=(0, 20))
 
         # Weak passwords
         if report["weak_passwords"]:
-            weak_card = ctk.CTkFrame(
-                self.items_container, fg_color=COLORS["bg_card"], corner_radius=12
+            weak_section = ctk.CTkFrame(
+                content_container, fg_color=COLORS["bg_card"], corner_radius=10
             )
-            weak_card.pack(fill="x", pady=8, ipady=15, ipadx=15)
+            weak_section.pack(fill="x", pady=(0, 12))
 
             ctk.CTkLabel(
-                weak_card, text="🔴 Weak Passwords", font=("Segoe UI", 16, "bold")
-            ).pack(anchor="w", pady=(5, 10))
+                weak_section,
+                text=f"⚠️ Weak Passwords ({len(report['weak_passwords'])})",
+                font=("Segoe UI", 15, "bold"),
+                text_color=COLORS["danger"],
+            ).pack(anchor="w", padx=15, pady=(12, 8))
 
             for pwd in report["weak_passwords"][:5]:
-                row = ctk.CTkFrame(weak_card, fg_color="transparent")
-                row.pack(fill="x", pady=3)
+                item_row = ctk.CTkFrame(
+                    weak_section, fg_color=COLORS["bg_secondary"], corner_radius=8
+                )
+                item_row.pack(fill="x", padx=15, pady=5, ipady=10, ipadx=12)
+
                 ctk.CTkLabel(
-                    row,
-                    text=f"• {pwd['title']} (Score: {pwd['score']}/100)",
-                    font=("Segoe UI", 12),
-                ).pack(anchor="w")
+                    item_row,
+                    text=pwd["title"],
+                    font=("Segoe UI", 12, "bold"),
+                    text_color=COLORS["text_primary"],
+                ).pack(side="left", padx=8)
+
+                ctk.CTkLabel(
+                    item_row,
+                    text=f"Strength: {pwd['score']}%",
+                    font=("Segoe UI", 11),
+                    text_color=COLORS["danger"],
+                ).pack(side="right", padx=8)
+
+            if len(report["weak_passwords"]) > 5:
+                ctk.CTkLabel(
+                    weak_section,
+                    text=f"+ {len(report['weak_passwords']) - 5} more",
+                    font=("Segoe UI", 10),
+                    text_color=COLORS["text_secondary"],
+                ).pack(anchor="w", padx=15, pady=(5, 12))
+            else:
+                ctk.CTkFrame(weak_section, height=8, fg_color="transparent").pack()
 
         # Reused passwords
         if report["reused_passwords"]:
-            reused_card = ctk.CTkFrame(
-                self.items_container, fg_color=COLORS["bg_card"], corner_radius=12
+            reused_section = ctk.CTkFrame(
+                content_container, fg_color=COLORS["bg_card"], corner_radius=10
             )
-            reused_card.pack(fill="x", pady=8, ipady=15, ipadx=15)
+            reused_section.pack(fill="x", pady=(0, 12))
 
             ctk.CTkLabel(
-                reused_card, text="🟡 Reused Passwords", font=("Segoe UI", 16, "bold")
-            ).pack(anchor="w", pady=(5, 10))
+                reused_section,
+                text=f"🔄 Reused Passwords ({len(report['reused_passwords'])})",
+                font=("Segoe UI", 15, "bold"),
+                text_color=COLORS["warning"],
+            ).pack(anchor="w", padx=15, pady=(12, 8))
 
-            for pwd in report["reused_passwords"][:5]:
-                row = ctk.CTkFrame(reused_card, fg_color="transparent")
-                row.pack(fill="x", pady=3)
-                used_in = ", ".join(pwd["used_in"][:3])
+            for reused in report["reused_passwords"][:5]:
+                item_row = ctk.CTkFrame(
+                    reused_section, fg_color=COLORS["bg_secondary"], corner_radius=8
+                )
+                item_row.pack(fill="x", padx=15, pady=5, ipady=10, ipadx=12)
+
+                used_in_text = ", ".join(reused["used_in"][:3])
+                if len(reused["used_in"]) > 3:
+                    used_in_text += f" +{len(reused['used_in']) - 3} more"
+
                 ctk.CTkLabel(
-                    row, text=f"• Used in: {used_in}", font=("Segoe UI", 12)
-                ).pack(anchor="w")
+                    item_row,
+                    text=f"Used in: {used_in_text}",
+                    font=("Segoe UI", 11),
+                    text_color=COLORS["text_primary"],
+                ).pack(side="left", padx=8)
+
+            if len(report["reused_passwords"]) > 5:
+                ctk.CTkLabel(
+                    reused_section,
+                    text=f"+ {len(report['reused_passwords']) - 5} more",
+                    font=("Segoe UI", 10),
+                    text_color=COLORS["text_secondary"],
+                ).pack(anchor="w", padx=15, pady=(5, 12))
+            else:
+                ctk.CTkFrame(reused_section, height=8, fg_color="transparent").pack()
 
         # Old passwords
         if report["old_passwords"]:
-            old_card = ctk.CTkFrame(
-                self.items_container, fg_color=COLORS["bg_card"], corner_radius=12
+            old_section = ctk.CTkFrame(
+                content_container, fg_color=COLORS["bg_card"], corner_radius=10
             )
-            old_card.pack(fill="x", pady=8, ipady=15, ipadx=15)
+            old_section.pack(fill="x", pady=(0, 12))
 
             ctk.CTkLabel(
-                old_card, text="🟠 Old Passwords", font=("Segoe UI", 16, "bold")
-            ).pack(anchor="w", pady=(5, 10))
+                old_section,
+                text=f"📅 Old Passwords ({len(report['old_passwords'])})",
+                font=("Segoe UI", 15, "bold"),
+                text_color=COLORS["warning"],
+            ).pack(anchor="w", padx=15, pady=(12, 8))
 
-            for pwd in report["old_passwords"][:5]:
-                row = ctk.CTkFrame(old_card, fg_color="transparent")
-                row.pack(fill="x", pady=3)
+            for old in report["old_passwords"][:5]:
+                item_row = ctk.CTkFrame(
+                    old_section, fg_color=COLORS["bg_secondary"], corner_radius=8
+                )
+                item_row.pack(fill="x", padx=15, pady=5, ipady=10, ipadx=12)
+
                 ctk.CTkLabel(
-                    row,
-                    text=f"• {pwd['title']} ({pwd['age_days']} days old)",
-                    font=("Segoe UI", 12),
-                ).pack(anchor="w")
+                    item_row,
+                    text=old["title"],
+                    font=("Segoe UI", 12, "bold"),
+                    text_color=COLORS["text_primary"],
+                ).pack(side="left", padx=8)
+
+                ctk.CTkLabel(
+                    item_row,
+                    text=f"{old['age_days']} days old",
+                    font=("Segoe UI", 11),
+                    text_color=COLORS["warning"],
+                ).pack(side="right", padx=8)
+
+            if len(report["old_passwords"]) > 5:
+                ctk.CTkLabel(
+                    old_section,
+                    text=f"+ {len(report['old_passwords']) - 5} more",
+                    font=("Segoe UI", 10),
+                    text_color=COLORS["text_secondary"],
+                ).pack(anchor="w", padx=15, pady=(5, 12))
+            else:
+                ctk.CTkFrame(old_section, height=8, fg_color="transparent").pack()
+
+        # RECOMMENDATIONS - NOW FULLY VISIBLE
+        rec_section = ctk.CTkFrame(
+            content_container, fg_color=COLORS["bg_card"], corner_radius=10
+        )
+        rec_section.pack(fill="x", pady=(0, 30))
+
+        ctk.CTkLabel(
+            rec_section,
+            text="💡 Security Recommendations",
+            font=("Segoe UI", 16, "bold"),
+            text_color=COLORS["accent"],
+        ).pack(anchor="w", padx=20, pady=(20, 15))
+
+        tips = []
+        if weak_count > 0:
+            tips.append(
+                f"• Update {weak_count} weak password(s) with stronger alternatives"
+            )
+        if reused_count > 0:
+            tips.append(f"• Change {reused_count} reused password(s) to unique ones")
+        if old_count > 0:
+            tips.append(f"• Refresh {old_count} password(s) older than 1 year")
+        if not tips:
+            tips.append("✅ Your password security is excellent! Keep it up.")
+
+        for tip in tips:
+            ctk.CTkLabel(
+                rec_section,
+                text=tip,
+                font=("Segoe UI", 13),
+                text_color=COLORS["text_primary"],
+                anchor="w",
+                justify="left",
+            ).pack(anchor="w", fill="x", padx=20, pady=(0, 12))
+
+        ctk.CTkFrame(rec_section, height=10, fg_color="transparent").pack()
+
+    def scan_all_passwords_for_breaches(self):
+        """Scan all passwords for breaches"""
+        from .breach_checker import scan_all_passwords
+
+        progress = self.create_dialog("Scanning...", 500, 300)
+        ctk.CTkLabel(
+            progress, text="🔍 Scanning passwords...", font=("Segoe UI", 16, "bold")
+        ).pack(pady=40)
+        status = ctk.CTkLabel(progress, text="Please wait...", font=("Segoe UI", 12))
+        status.pack(pady=20)
+        progress.update()
+
+        results = scan_all_passwords(self.vault)
+        progress.destroy()
+
+        # Show results
+        dlg = self.create_dialog("Scan Results", 700, 600)
+        ctk.CTkLabel(
+            dlg,
+            text=f"✅ Scanned {results['total_checked']} passwords",
+            font=("Segoe UI", 18, "bold"),
+        ).pack(pady=20)
+
+        if results["breached"]:
+            ctk.CTkLabel(
+                dlg,
+                text=f"⚠️ {len(results['breached'])} BREACHED!",
+                font=("Segoe UI", 14, "bold"),
+                text_color=COLORS["danger"],
+            ).pack()
+            scroll = ctk.CTkScrollableFrame(dlg, width=650, height=350)
+            scroll.pack(pady=10)
+            for item in results["breached"]:
+                card = ctk.CTkFrame(scroll, fg_color=COLORS["danger"], corner_radius=8)
+                card.pack(fill="x", pady=5, ipady=8, ipadx=10)
+                ctk.CTkLabel(
+                    card, text=f"🚨 {item['title']}", font=("Segoe UI", 12, "bold")
+                ).pack(anchor="w", padx=10)
+                ctk.CTkLabel(
+                    card, text=item["breach_info"]["message"], font=("Segoe UI", 10)
+                ).pack(anchor="w", padx=10)
+        else:
+            ctk.CTkLabel(
+                dlg,
+                text="✅ All passwords safe!",
+                font=("Segoe UI", 16),
+                text_color=COLORS["success"],
+            ).pack(pady=50)
+
+        ctk.CTkButton(dlg, text="Close", command=dlg.destroy).pack(pady=20)
 
     def display_bulk_delete(self):
         """Display bulk delete manager"""
@@ -1475,13 +1924,15 @@ class LockBoxUI:
 
         # Category pill buttons
         categories = [
-            ("All Items", "🔍"),
-            ("Passwords", "🔑"),
-            ("API Keys", "🔐"),
-            ("Notes", "📝"),
-            ("SSH Keys", "🗝️"),
-            ("Files", "📄"),
-            ("Folders", "📁"),
+            ("🔒 Passwords", "passwords"),
+            ("🔑 API Keys", "api_keys"),
+            ("📝 Secure Notes", "notes"),
+            ("🗝️ SSH Keys", "ssh_keys"),
+            ("🔐 2FA/TOTP", "totp_codes"),  # ← NEW
+            ("📄 Files", "files"),
+            ("📁 Folders", "encrypted_folders"),
+            ("📊 Security", "security"),
+            ("🗑️ Bulk Delete", "bulk_delete"),
         ]
 
         self.category_pill_buttons = {}
@@ -1799,6 +2250,8 @@ class LockBoxUI:
             self.show_add_note_dialog()
         elif self.current_category == "ssh_keys":
             self.show_add_ssh_key_dialog()
+        elif self.current_category == "totp_codes":  # ← ADD THIS
+            self.show_add_totp_dialog()
         elif self.current_category == "files":
             self.show_add_file_dialog()
         elif self.current_category == "encrypted_folders":
@@ -3238,6 +3691,49 @@ class LockBoxUI:
             command=change,
         ).pack(pady=20)
 
+    def show_shortcuts_help(self):
+        """Display keyboard shortcuts"""
+        dialog = self.create_dialog("Keyboard Shortcuts", 500, 450)
+
+        ctk.CTkLabel(
+            dialog, text="⌨️ Keyboard Shortcuts", font=("Segoe UI", 20, "bold")
+        ).pack(pady=20)
+
+        shortcuts_frame = ctk.CTkFrame(
+            dialog, fg_color=COLORS["bg_card"], corner_radius=10
+        )
+        shortcuts_frame.pack(pady=10, padx=20, fill="both", expand=True)
+
+        shortcuts = [
+            ("Ctrl + L", "Lock vault"),
+            ("Ctrl + F", "Toggle search"),
+            ("Ctrl + N", "Add new item"),
+            ("Ctrl + B", "Create backup"),
+            ("Ctrl + Q", "Quit application"),
+            ("Escape", "Close search"),
+        ]
+
+        for key, action in shortcuts:
+            row = ctk.CTkFrame(shortcuts_frame, fg_color="transparent")
+            row.pack(fill="x", pady=8, padx=20)
+
+            ctk.CTkLabel(
+                row,
+                text=key,
+                font=("Consolas", 12, "bold"),
+                text_color=COLORS["accent"],
+                width=120,
+                anchor="w",
+            ).pack(side="left")
+
+            ctk.CTkLabel(row, text=action, font=("Segoe UI", 12), anchor="w").pack(
+                side="left"
+            )
+
+        ctk.CTkButton(
+            dialog, text="Close", width=200, height=40, command=dialog.destroy
+        ).pack(pady=20)
+
     def copy_to_clipboard(self, text, label="Data"):
         """Copy text to clipboard with auto-clear"""
         pyperclip.copy(text)
@@ -3298,10 +3794,847 @@ class LockBoxUI:
     def lock_vault(self):
         """Lock vault and return to login"""
         self.reset_activity()
+        # Cancel TOTP auto-refresh when leaving
+        if hasattr(self, "_totp_timer"):
+            self.app.after_cancel(self._totp_timer)
+            delattr(self, "_totp_timer")
         self.vault.lock()
         self.show_login()
 
+    def check_password_breach(self, item):
+        """Check if password has been breached"""
+        self.reset_activity()
 
+        from .breach_checker import check_password_breach
+
+        # Show checking dialog
+        dialog = self.create_dialog("Checking Password", 500, 450)
+
+        # Title
+        ctk.CTkLabel(
+            dialog, text="🔍 Password Breach Check", font=("Segoe UI", 20, "bold")
+        ).pack(pady=(20, 10))
+
+        # Status label
+        status_label = ctk.CTkLabel(
+            dialog,
+            text="⏳ Checking against Have I Been Pwned database...\nThis uses k-anonymity (your password is safe)",
+            font=("Segoe UI", 12),
+            text_color=COLORS["text_secondary"],
+        )
+        status_label.pack(pady=20)
+
+        # Force UI update
+        dialog.update_idletasks()
+        dialog.update()
+
+        # Check the password
+        try:
+            password = item.get("password", "")
+            if not password:
+                status_label.configure(
+                    text="❌ No password found", text_color=COLORS["danger"]
+                )
+                return
+
+            result = check_password_breach(password)
+
+            # Update status with result
+            status_label.configure(
+                text=result["message"],
+                text_color=result["color"],
+                font=("Segoe UI", 16, "bold"),
+            )
+
+            # Add details based on result
+            if result["breached"]:
+                # DANGER - Password leaked
+                details = f"""
+⚠️ This password was found in {result['count']:,} data breaches!
+
+What this means:
+- Hackers have this password in their databases
+- They can use it to try to access your accounts
+- You should change it IMMEDIATELY
+
+Password: {item.get('title', 'Unknown')}
+"""
+                ctk.CTkLabel(
+                    dialog,
+                    text=details,
+                    font=("Segoe UI", 11),
+                    text_color=COLORS["danger"],
+                    wraplength=430,
+                    justify="left",
+                ).pack(pady=15, padx=20)
+
+            elif result["breached"] == False:
+                # SAFE - Not found
+                details = """
+✅ Good news! This password has not been found 
+in any known data breaches.
+
+However:
+- Always use strong, unique passwords
+- Enable 2FA when possible
+- Change passwords regularly
+"""
+                ctk.CTkLabel(
+                    dialog,
+                    text=details,
+                    font=("Segoe UI", 11),
+                    text_color=COLORS["success"],
+                    wraplength=430,
+                    justify="left",
+                ).pack(pady=15, padx=20)
+
+            else:
+                # ERROR - Could not check
+                details = """
+⚠️ Could not complete the check.
+This might be due to:
+- No internet connection
+- API temporarily unavailable
+- Firewall blocking the request
+
+Try again later.
+"""
+                ctk.CTkLabel(
+                    dialog,
+                    text=details,
+                    font=("Segoe UI", 11),
+                    text_color=COLORS["warning"],
+                    wraplength=430,
+                    justify="left",
+                ).pack(pady=15, padx=20)
+
+        except Exception as e:
+            status_label.configure(
+                text=f"❌ Error: {str(e)}", text_color=COLORS["danger"]
+            )
+
+        # Close button
+        ctk.CTkButton(
+            dialog,
+            text="Close",
+            width=200,
+            height=45,
+            font=("Segoe UI", 13, "bold"),
+            fg_color=COLORS["bg_secondary"],
+            hover_color=COLORS["accent"],
+            corner_radius=8,
+            command=dialog.destroy,
+        ).pack(pady=(15, 25))
+
+    def display_totp_items(self, items):
+        """Display TOTP/2FA codes with live countdown"""
+        import pyotp
+
+        # Always rebuild from scratch (simpler and more reliable)
+        for widget in self.items_container.winfo_children():
+            widget.destroy()
+
+        if not items:
+            ctk.CTkLabel(
+                self.items_container,
+                text="No 2FA codes yet\nClick '+ Add New' to create one",
+                font=("Segoe UI", 16),
+                text_color=COLORS["text_secondary"],
+            ).pack(pady=100)
+            return
+
+        # Store references for updates
+        self._totp_labels = {}
+
+        for item in items:
+            card = ctk.CTkFrame(
+                self.items_container, fg_color=COLORS["bg_card"], corner_radius=12
+            )
+            card.pack(fill="x", pady=10, padx=10, ipady=15, ipadx=15)
+
+            # Header
+            header_row = ctk.CTkFrame(card, fg_color="transparent")
+            header_row.pack(fill="x", pady=(0, 5), padx=5)
+
+            ctk.CTkLabel(
+                header_row,
+                text=item.get("name", "Untitled"),
+                font=("Segoe UI", 16, "bold"),
+            ).pack(side="left", anchor="w")
+
+            if item.get("issuer"):
+                ctk.CTkLabel(
+                    header_row,
+                    text=f"({item['issuer']})",
+                    font=("Segoe UI", 12),
+                    text_color=COLORS["text_secondary"],
+                ).pack(side="left", padx=(10, 0))
+
+            # Code display
+            code_frame = ctk.CTkFrame(
+                card, fg_color=COLORS["bg_secondary"], corner_radius=10
+            )
+            code_frame.pack(fill="x", pady=(10, 10), padx=5, ipady=12)
+
+            code_row = ctk.CTkFrame(code_frame, fg_color="transparent")
+            code_row.pack(fill="x", padx=15)
+
+            # Generate initial code
+            try:
+                totp = pyotp.TOTP(item["secret"])
+                code = totp.now()
+                remaining = 30 - (int(datetime.now().timestamp()) % 30)
+                formatted_code = f"{code[:3]} {code[3:]}"
+            except:
+                formatted_code = "ERROR"
+                remaining = 0
+
+            code_label = ctk.CTkLabel(
+                code_row,
+                text=formatted_code,
+                font=("Consolas", 32, "bold"),
+                text_color=COLORS["accent"],
+            )
+            code_label.pack(side="left")
+
+            timer_color = COLORS["danger"] if remaining <= 5 else COLORS["success"]
+            timer_label = ctk.CTkLabel(
+                code_row,
+                text=f"⏱️ {remaining}s",
+                font=("Segoe UI", 14, "bold"),
+                text_color=timer_color,
+            )
+            timer_label.pack(side="right")
+
+            # Store for updates
+            self._totp_labels[item["id"]] = {
+                "secret": item["secret"],
+                "code_label": code_label,
+                "timer_label": timer_label,
+            }
+
+            # Date info
+            date_row = ctk.CTkFrame(card, fg_color="transparent")
+            date_row.pack(fill="x", pady=(5, 10), padx=5)
+
+            created = item.get("created", "Unknown")
+            if created != "Unknown" and len(created) > 10:
+                created = created[:10]
+
+            ctk.CTkLabel(
+                date_row,
+                text=f"📅 Created: {created}",
+                font=("Segoe UI", 11),
+                text_color=COLORS["text_secondary"],
+            ).pack(side="left", padx=(5, 0))
+
+            # Actions
+            actions = ctk.CTkFrame(card, fg_color="transparent")
+            actions.pack(fill="x", pady=(10, 0), padx=5)
+
+            copy_btn = ctk.CTkButton(
+                actions,
+                text="📋 Copy Code",
+                width=120,
+                height=32,
+                fg_color=COLORS["accent"],
+                hover_color=COLORS["accent_hover"],
+                corner_radius=6,
+                command=lambda s=item["secret"]: self._copy_current_totp(s),
+            )
+            copy_btn.pack(side="left", padx=(5, 8))
+
+            ctk.CTkButton(
+                actions,
+                text="🗑️ Delete",
+                width=90,
+                height=32,
+                fg_color=COLORS["danger"],
+                hover_color="#c0392b",
+                corner_radius=6,
+                command=lambda i=item["id"]: self.delete_totp(i),
+            ).pack(side="right", padx=(0, 5))
+
+        # Start auto-refresh (updates every second)
+        self._schedule_totp_refresh()
+
+    def _schedule_totp_refresh(self):
+        """Schedule the next TOTP refresh"""
+        # Cancel any existing timer
+        if hasattr(self, "_totp_timer"):
+            self.app.after_cancel(self._totp_timer)
+
+        # Only schedule if still on TOTP page and unlocked
+        if (
+            hasattr(self, "current_category")
+            and self.current_category == "totp_codes"
+            and not self.vault.is_locked
+            and hasattr(self, "_totp_labels")
+        ):
+            self._totp_timer = self.app.after(1000, self._update_totp_display)
+
+    def _copy_current_totp(self, secret):
+        """Copy the CURRENT TOTP code (not cached)"""
+        import pyotp
+
+        try:
+            totp = pyotp.TOTP(secret)
+            current_code = totp.now()
+            self.copy_to_clipboard(current_code, "TOTP Code")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to generate code: {str(e)}")
+
+    def _update_totp_display(self):
+        """Update TOTP codes and countdown without rebuilding"""
+        import pyotp
+
+        if not hasattr(self, "_totp_labels"):
+            return
+
+        for item_id, data in list(self._totp_labels.items()):
+            try:
+                # Check if widgets still exist
+                if not data["code_label"].winfo_exists():
+                    continue
+
+                # Generate new code
+                totp = pyotp.TOTP(data["secret"])
+                code = totp.now()
+                remaining = 30 - (int(datetime.now().timestamp()) % 30)
+
+                # Update display
+                formatted_code = f"{code[:3]} {code[3:]}"
+                data["code_label"].configure(text=formatted_code)
+
+                # Update timer color
+                timer_color = COLORS["danger"] if remaining <= 5 else COLORS["success"]
+                data["timer_label"].configure(
+                    text=f"⏱️ {remaining}s", text_color=timer_color
+                )
+
+            except Exception as e:
+                print(f"Error updating TOTP {item_id}: {e}")
+                continue
+
+        # Schedule next update
+        self._schedule_totp_refresh()
+
+    def _update_totp_codes_only(self):
+        """Update TOTP codes without rebuilding widgets"""
+        import pyotp
+
+        # Safety check
+        if not hasattr(self, "_totp_cards") or not self._totp_cards:
+            return
+
+        items = self.vault.list_totp()
+
+        for item in items:
+            item_id = item["id"]
+            if item_id not in self._totp_cards:
+                continue
+
+            card_data = self._totp_cards[item_id]
+
+            try:
+                # Check if widget still exists
+                if not card_data["code_label"].winfo_exists():
+                    continue
+
+                totp = pyotp.TOTP(item["secret"])
+                code = totp.now()
+                remaining = 30 - (int(datetime.now().timestamp()) % 30)
+
+                # Format and update
+                formatted_code = f"{code[:3]} {code[3:]}"
+                card_data["code_label"].configure(text=formatted_code)
+
+                timer_color = COLORS["danger"] if remaining <= 5 else COLORS["success"]
+                card_data["timer_label"].configure(
+                    text=f"⏱️ {remaining}s", text_color=timer_color
+                )
+
+                card_data["copy_btn"].configure(
+                    command=lambda c=code: self.copy_to_clipboard(c, "TOTP Code")
+                )
+            except:
+                continue
+
+        # Schedule next update HERE
+        if self.current_category == "totp_codes" and not self.vault.is_locked:
+            self._totp_timer = self.app.after(1000, self._refresh_totp)
+
+    def _refresh_totp(self):
+        """Auto-refresh TOTP display every second"""
+        # Only refresh if still on TOTP page and unlocked
+        if (
+            hasattr(self, "current_category")
+            and self.current_category == "totp_codes"
+            and not self.vault.is_locked
+        ):
+            self.display_items()
+
+    def show_add_totp_dialog(self):
+        """Dialog to add TOTP/2FA code"""
+        dialog = self.create_dialog("Add 2FA/TOTP Code", 550, 500)
+
+        ctk.CTkLabel(
+            dialog, text="Add 2FA/TOTP Code", font=("Segoe UI", 20, "bold")
+        ).pack(pady=20)
+
+        ctk.CTkLabel(
+            dialog,
+            text="Scan QR code with your authenticator app, then paste the secret key here",
+            font=("Segoe UI", 11),
+            text_color=COLORS["text_secondary"],
+            wraplength=480,
+        ).pack(pady=(0, 15))
+
+        name_entry = ctk.CTkEntry(
+            dialog, width=450, height=40, placeholder_text="Name (e.g., Google, GitHub)"
+        )
+        name_entry.pack(pady=10)
+
+        issuer_entry = ctk.CTkEntry(
+            dialog,
+            width=450,
+            height=40,
+            placeholder_text="Issuer (optional, e.g., google.com)",
+        )
+        issuer_entry.pack(pady=10)
+
+        secret_entry = ctk.CTkEntry(
+            dialog, width=450, height=40, placeholder_text="Secret Key (from QR code)"
+        )
+        secret_entry.pack(pady=10)
+
+        # Test code preview
+        preview_label = ctk.CTkLabel(
+            dialog,
+            text="",
+            font=("Consolas", 18, "bold"),
+            text_color=COLORS["accent"],
+        )
+        preview_label.pack(pady=10)
+
+        status = ctk.CTkLabel(dialog, text="", font=("Segoe UI", 12))
+        status.pack(pady=5)
+
+        def test_code():
+            """Test if secret key generates valid code"""
+            import pyotp
+
+            secret = secret_entry.get().strip().replace(" ", "").upper()
+
+            if not secret:
+                preview_label.configure(text="Enter secret key to test")
+                return
+
+            try:
+                totp = pyotp.TOTP(secret)
+                code = totp.now()
+                formatted = f"{code[:3]} {code[3:]}"
+                preview_label.configure(text=f"✅ Test Code: {formatted}")
+                status.configure(text="", text_color=COLORS["success"])
+            except Exception as e:
+                preview_label.configure(text="")
+                status.configure(
+                    text=f"❌ Invalid secret: {str(e)}", text_color=COLORS["danger"]
+                )
+
+        def save():
+            name = name_entry.get().strip()
+            issuer = issuer_entry.get().strip()
+            secret = secret_entry.get().strip().replace(" ", "").upper()
+
+            if not name or not secret:
+                status.configure(
+                    text="❌ Name and secret required", text_color=COLORS["danger"]
+                )
+                return
+
+            try:
+                # Validate secret by generating a code
+                import pyotp
+
+                totp = pyotp.TOTP(secret)
+                totp.now()  # This will raise error if invalid
+
+                self.vault.add_totp(name, secret, issuer)
+                dialog.destroy()
+                self.display_items()
+                messagebox.showinfo("Success", "2FA code added successfully!")
+            except Exception as e:
+                status.configure(
+                    text=f"❌ Error: {str(e)}", text_color=COLORS["danger"]
+                )
+
+        # Buttons
+        button_row = ctk.CTkFrame(dialog, fg_color="transparent")
+        button_row.pack(pady=20)
+
+        ctk.CTkButton(
+            button_row,
+            text="🧪 Test Code",
+            width=180,
+            height=45,
+            font=("Segoe UI", 13, "bold"),
+            fg_color="gray30",
+            hover_color="gray40",
+            corner_radius=8,
+            command=test_code,
+        ).pack(side="left", padx=5)
+
+        ctk.CTkButton(
+            button_row,
+            text="💾 Save Code",
+            width=240,
+            height=45,
+            font=("Segoe UI", 13, "bold"),
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_hover"],
+            corner_radius=8,
+            command=save,
+        ).pack(side="left", padx=5)
+
+    def delete_totp(self, totp_id):
+        """Delete TOTP code"""
+        self.reset_activity()
+        if not messagebox.askyesno(
+            "Confirm Delete", "Are you sure you want to delete this 2FA code?"
+        ):
+            return
+
+        try:
+            self.vault.delete_totp(totp_id)
+            self.display_items()
+            messagebox.showinfo("Success", "2FA code deleted successfully!")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to delete: {str(e)}")
+
+    def show_recovery_phrase_setup(self, recovery_phrase):
+        """Show recovery phrase after new vault creation"""
+        dialog = self.create_dialog("🔐 SAVE YOUR RECOVERY PHRASE", 700, 750)
+
+        warning_frame = ctk.CTkFrame(
+            dialog, fg_color="#8B0000", corner_radius=12, height=100
+        )
+        warning_frame.pack(fill="x", padx=20, pady=(20, 15))
+        warning_frame.pack_propagate(False)
+
+        ctk.CTkLabel(
+            warning_frame,
+            text="⚠️ CRITICAL: SAVE THIS RECOVERY PHRASE ⚠️",
+            font=("Segoe UI", 18, "bold"),
+            text_color="white",
+        ).pack(pady=5)
+
+        ctk.CTkLabel(
+            warning_frame,
+            text="If you forget your master password, THIS IS THE ONLY WAY to recover your vault.\nWrite it down on paper. DO NOT save digitally. Keep it safe.",
+            font=("Segoe UI", 11),
+            text_color="white",
+            wraplength=620,
+        ).pack(pady=5)
+
+        ctk.CTkLabel(
+            dialog, text="Your 24-Word Recovery Phrase:", font=("Segoe UI", 16, "bold")
+        ).pack(pady=(15, 10))
+
+        phrase_frame = ctk.CTkFrame(
+            dialog, fg_color=COLORS["bg_card"], corner_radius=12, height=320
+        )
+        phrase_frame.pack(padx=20, pady=10, fill="both")
+
+        from .recovery import RecoverySystem
+
+        recovery = RecoverySystem(self.vault.path)
+        formatted_words = recovery.format_phrase_for_display(recovery_phrase)
+
+        columns = [[], [], []]
+        for i, (num, word) in enumerate(formatted_words):
+            columns[i % 3].append((num, word))
+
+        grid_container = ctk.CTkFrame(phrase_frame, fg_color="transparent")
+        grid_container.pack(expand=True, pady=20, padx=20)
+
+        for col_idx, column in enumerate(columns):
+            col_frame = ctk.CTkFrame(grid_container, fg_color="transparent")
+            col_frame.grid(row=0, column=col_idx, padx=15, sticky="n")
+
+            for num, word in column:
+                word_row = ctk.CTkFrame(
+                    col_frame, fg_color=COLORS["bg_secondary"], corner_radius=8
+                )
+                word_row.pack(pady=4, fill="x", ipady=8, ipadx=12)
+
+                ctk.CTkLabel(
+                    word_row,
+                    text=f"{num}.",
+                    font=("Consolas", 12, "bold"),
+                    text_color=COLORS["text_secondary"],
+                    width=30,
+                    anchor="e",
+                ).pack(side="left", padx=(5, 10))
+
+                ctk.CTkLabel(
+                    word_row,
+                    text=word,
+                    font=("Consolas", 13, "bold"),
+                    text_color=COLORS["accent"],
+                    anchor="w",
+                ).pack(side="left")
+
+        def copy_phrase():
+            import pyperclip
+
+            pyperclip.copy(recovery_phrase)
+            copy_btn.configure(text="✅ Copied!")
+            dialog.after(2000, lambda: copy_btn.configure(text="📋 Copy All Words"))
+
+        copy_btn = ctk.CTkButton(
+            dialog,
+            text="📋 Copy All Words",
+            width=300,
+            height=40,
+            font=("Segoe UI", 13, "bold"),
+            fg_color="gray30",
+            hover_color="gray40",
+            corner_radius=8,
+            command=copy_phrase,
+        )
+        copy_btn.pack(pady=10)
+
+        verified = tk.BooleanVar(value=False)
+
+        verify_frame = ctk.CTkFrame(
+            dialog, fg_color=COLORS["bg_card"], corner_radius=10
+        )
+        verify_frame.pack(padx=20, pady=15, fill="x", ipady=10)
+
+        ctk.CTkCheckBox(
+            verify_frame,
+            text="✅ I have written down my recovery phrase in a safe place",
+            variable=verified,
+            font=("Segoe UI", 12, "bold"),
+            checkbox_width=24,
+            checkbox_height=24,
+        ).pack(pady=10, padx=20)
+
+        status = ctk.CTkLabel(dialog, text="", font=("Segoe UI", 12))
+        status.pack(pady=5)
+
+        def confirm_and_close():
+            if not verified.get():
+                status.configure(
+                    text="❌ You must confirm you saved the recovery phrase",
+                    text_color=COLORS["danger"],
+                )
+                return
+
+            self.verify_recovery_phrase_saved(recovery_phrase, dialog)
+
+        ctk.CTkButton(
+            dialog,
+            text="✅ I've Saved It - Continue",
+            width=400,
+            height=50,
+            font=("Segoe UI", 15, "bold"),
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_hover"],
+            corner_radius=10,
+            command=confirm_and_close,
+        ).pack(pady=(10, 25))
+
+        dialog.protocol("WM_DELETE_WINDOW", lambda: None)
+
+    def verify_recovery_phrase_saved(self, original_phrase, parent_dialog):
+        """Quiz user on 3 random words"""
+        import random
+
+        words = original_phrase.split()
+        word_positions = random.sample(range(1, 25), 3)
+        word_positions.sort()
+
+        quiz_dialog = self.create_dialog("🧪 Verify You Saved It", 500, 400)
+
+        ctk.CTkLabel(
+            quiz_dialog, text="Quick Verification Test", font=("Segoe UI", 20, "bold")
+        ).pack(pady=20)
+
+        ctk.CTkLabel(
+            quiz_dialog,
+            text="Enter these 3 words from your recovery phrase\nto prove you saved it:",
+            font=("Segoe UI", 12),
+            text_color=COLORS["text_secondary"],
+        ).pack(pady=10)
+
+        entries = []
+        for pos in word_positions:
+            word_frame = ctk.CTkFrame(quiz_dialog, fg_color="transparent")
+            word_frame.pack(pady=8)
+
+            ctk.CTkLabel(
+                word_frame,
+                text=f"Word #{pos}:",
+                font=("Segoe UI", 13, "bold"),
+                width=80,
+                anchor="e",
+            ).pack(side="left", padx=5)
+
+            entry = ctk.CTkEntry(
+                word_frame, width=200, height=40, font=("Consolas", 13)
+            )
+            entry.pack(side="left", padx=5)
+            entries.append((pos, entry))
+
+        status = ctk.CTkLabel(quiz_dialog, text="", font=("Segoe UI", 12))
+        status.pack(pady=10)
+
+        def check_answers():
+            all_correct = True
+            for pos, entry in entries:
+                entered_word = entry.get().strip().lower()
+                correct_word = words[pos - 1].lower()
+
+                if entered_word != correct_word:
+                    all_correct = False
+                    entry.configure(border_color=COLORS["danger"], border_width=2)
+                else:
+                    entry.configure(border_color=COLORS["success"], border_width=2)
+
+            if all_correct:
+                status.configure(
+                    text="✅ Perfect! You've saved your recovery phrase.",
+                    text_color=COLORS["success"],
+                )
+                quiz_dialog.after(
+                    1500, lambda: [quiz_dialog.destroy(), parent_dialog.destroy()]
+                )
+                self.show_vault()
+            else:
+                status.configure(
+                    text="❌ Some words are incorrect. Check your notes and try again.",
+                    text_color=COLORS["danger"],
+                )
+
+        ctk.CTkButton(
+            quiz_dialog,
+            text="✅ Verify",
+            width=300,
+            height=45,
+            font=("Segoe UI", 14, "bold"),
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_hover"],
+            corner_radius=8,
+            command=check_answers,
+        ).pack(pady=20)
+
+        entries[0][1].focus()
+
+    def show_recovery_unlock_dialog(self):
+        """Unlock vault with recovery phrase"""
+        dialog = self.create_dialog("🔐 Recover Vault", 600, 600)
+
+        ctk.CTkLabel(
+            dialog, text="Recover Your Vault", font=("Segoe UI", 24, "bold")
+        ).pack(pady=20)
+
+        ctk.CTkLabel(
+            dialog,
+            text="Enter your 24-word recovery phrase below.\nSeparate words with spaces.",
+            font=("Segoe UI", 12),
+            text_color=COLORS["text_secondary"],
+        ).pack(pady=10)
+
+        phrase_box = ctk.CTkTextbox(
+            dialog,
+            width=540,
+            height=200,
+            font=("Consolas", 12),
+            border_width=2,
+            border_color=COLORS["bg_secondary"],
+        )
+        phrase_box.pack(pady=15, padx=30)
+
+        count_label = ctk.CTkLabel(
+            dialog,
+            text="0 / 24 words",
+            font=("Segoe UI", 11),
+            text_color=COLORS["text_secondary"],
+        )
+        count_label.pack(pady=5)
+
+        def update_word_count(*args):
+            text = phrase_box.get("1.0", "end-1c").strip()
+            word_count = len(text.split()) if text else 0
+
+            color = COLORS["success"] if word_count == 24 else COLORS["text_secondary"]
+            count_label.configure(text=f"{word_count} / 24 words", text_color=color)
+
+        phrase_box.bind("<KeyRelease>", update_word_count)
+
+        status = ctk.CTkLabel(dialog, text="", font=("Segoe UI", 12))
+        status.pack(pady=10)
+
+        def attempt_recovery():
+            phrase = phrase_box.get("1.0", "end-1c").strip()
+
+            if not phrase:
+                status.configure(
+                    text="❌ Enter your recovery phrase", text_color=COLORS["danger"]
+                )
+                return
+
+            from .recovery import RecoverySystem
+
+            recovery = RecoverySystem(self.vault.path)
+
+            valid, error = recovery.validate_phrase_format(phrase)
+            if not valid:
+                status.configure(text=f"❌ {error}", text_color=COLORS["danger"])
+                return
+
+            status.configure(text="⏳ Unlocking vault...", text_color=COLORS["warning"])
+            dialog.update()
+
+            try:
+                self.vault.unlock_with_recovery(phrase)
+                dialog.destroy()
+                self.show_vault()
+                messagebox.showinfo("Success", "✅ Vault unlocked successfully!")
+            except Exception as e:
+                status.configure(text=f"❌ {str(e)}", text_color=COLORS["danger"])
+
+        button_row = ctk.CTkFrame(dialog, fg_color="transparent")
+        button_row.pack(pady=20)
+
+        ctk.CTkButton(
+            button_row,
+            text="❌ Cancel",
+            width=150,
+            height=45,
+            font=("Segoe UI", 13),
+            fg_color="gray30",
+            hover_color="gray40",
+            corner_radius=8,
+            command=dialog.destroy,
+        ).pack(side="left", padx=10)
+
+        ctk.CTkButton(
+            button_row,
+            text="🔓 Unlock Vault",
+            width=250,
+            height=45,
+            font=("Segoe UI", 14, "bold"),
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_hover"],
+            corner_radius=8,
+            command=attempt_recovery,
+        ).pack(side="left", padx=10)
+
+
+# THIS SHOULD BE AT THE VERY END - OUTSIDE THE CLASS
 def start():
     """Start the LockBox application"""
     app = LockBoxUI()

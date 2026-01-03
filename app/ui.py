@@ -1361,60 +1361,51 @@ class LockBoxUI:
                 ).pack(anchor="w")
 
     def display_bulk_delete(self):
-        """Display bulk delete manager with checkboxes"""
-        # Header with controls
-        control_bar = ctk.CTkFrame(
-            self.items_container, fg_color=COLORS["bg_card"], corner_radius=12
-        )
-        control_bar.pack(fill="x", pady=(0, 20), ipady=15, ipadx=20)
+        """Display bulk delete manager"""
 
         # Selection tracking
         self.bulk_selected = []
+        self.bulk_category_filter = "All Items"
 
-        # Select All checkbox
-        select_all_var = tk.BooleanVar(value=False)
-
-        def toggle_select_all():
-            if select_all_var.get():
-                # Select all
-                self.bulk_selected = [
-                    item["checkbox_id"] for item in all_items_with_meta
-                ]
-                for item in all_items_with_meta:
-                    item["var"].set(True)
-            else:
-                # Deselect all
-                self.bulk_selected = []
-                for item in all_items_with_meta:
-                    item["var"].set(False)
-            update_count_label()
-
-        ctk.CTkCheckBox(
-            control_bar,
-            text="Select All",
-            variable=select_all_var,
-            font=("Segoe UI", 13, "bold"),
-            command=toggle_select_all,
-            checkbox_width=24,
-            checkbox_height=24,
-        ).pack(side="left", padx=(0, 20))
-
-        # Count label
-        count_label = ctk.CTkLabel(
-            control_bar,
-            text="0 items selected",
-            font=("Segoe UI", 12, "bold"),
-            text_color=COLORS["accent"],
+        # Top control bar - SINGLE clean header
+        control_bar = ctk.CTkFrame(
+            self.items_container,
+            fg_color=COLORS["bg_card"],
+            corner_radius=12,
+            height=75,
         )
-        count_label.pack(side="left", padx=(0, 20))
+        control_bar.pack(fill="x", pady=(0, 15), ipady=12, ipadx=25)
+        control_bar.pack_propagate(False)
 
-        def update_count_label():
+        # Left side - Title and count
+        left_side = ctk.CTkFrame(control_bar, fg_color="transparent")
+        left_side.pack(side="left", fill="y", pady=8)
+
+        title_frame = ctk.CTkFrame(left_side, fg_color="transparent")
+        title_frame.pack(anchor="w")
+
+        ctk.CTkLabel(
+            title_frame,
+            text="🗑️ Bulk Delete",
+            font=("Segoe UI", 18, "bold"),
+        ).pack(side="left")
+
+        self.selection_label = ctk.CTkLabel(
+            left_side,
+            text="0 items selected",
+            font=("Segoe UI", 12),
+            text_color=COLORS["text_secondary"],
+        )
+        self.selection_label.pack(anchor="w", pady=(4, 0))
+
+        # Right side - Delete button
+        def update_selection_label():
             count = len(self.bulk_selected)
-            count_label.configure(
-                text=f"{count} item{'s' if count != 1 else ''} selected"
+            self.selection_label.configure(
+                text=f"{count} item{'s' if count != 1 else ''} selected",
+                text_color=COLORS["accent"] if count > 0 else COLORS["text_secondary"],
             )
 
-        # Delete selected button
         def delete_selected():
             if not self.bulk_selected:
                 messagebox.showinfo("No Selection", "Please select items to delete")
@@ -1423,14 +1414,12 @@ class LockBoxUI:
             count = len(self.bulk_selected)
             if not messagebox.askyesno(
                 "Confirm Bulk Delete",
-                f"Are you sure you want to delete {count} item{'s' if count != 1 else ''}?\n\nThis action cannot be undone!",
+                f"Are you sure you want to permanently delete {count} item{'s' if count != 1 else ''}?\n\n⚠️ This action cannot be undone!",
             ):
                 return
 
-            # Delete all selected items
             deleted = 0
             for checkbox_id in self.bulk_selected:
-                # Parse checkbox_id format: "category:item_id"
                 category, item_id = checkbox_id.split(":", 1)
 
                 try:
@@ -1452,7 +1441,7 @@ class LockBoxUI:
 
             messagebox.showinfo(
                 "Success",
-                f"Deleted {deleted} item{'s' if deleted != 1 else ''} successfully!",
+                f"✅ Deleted {deleted} item{'s' if deleted != 1 else ''} successfully!",
             )
             self.display_items()
 
@@ -1460,48 +1449,106 @@ class LockBoxUI:
             control_bar,
             text="🗑️ Delete Selected",
             width=160,
-            height=40,
+            height=42,
             font=("Segoe UI", 13, "bold"),
             fg_color=COLORS["danger"],
             hover_color="#c0392b",
             corner_radius=8,
             command=delete_selected,
-        ).pack(side="right")
+        ).pack(side="right", pady=8, padx=10)
 
-        # Category filter dropdown
-        category_filter_var = tk.StringVar(value="All Items")
-
-        def filter_by_category(choice):
-            self.display_items()
-
-        filter_options = [
-            "All Items",
-            "Passwords",
-            "API Keys",
-            "Notes",
-            "SSH Keys",
-            "Files",
-            "Folders",
-        ]
-        category_filter = ctk.CTkOptionMenu(
-            control_bar,
-            values=filter_options,
-            variable=category_filter_var,
-            width=140,
-            height=40,
-            font=("Segoe UI", 12),
-            fg_color=COLORS["bg_secondary"],
-            button_color=COLORS["accent"],
-            command=filter_by_category,
+        # Category filter pills
+        filter_bar = ctk.CTkFrame(
+            self.items_container,
+            fg_color=COLORS["bg_card"],
+            corner_radius=12,
+            height=60,
         )
-        category_filter.pack(side="right", padx=(0, 10))
+        filter_bar.pack(fill="x", pady=(0, 15), ipady=8, ipadx=20)
+        filter_bar.pack_propagate(False)
 
-        # Get all items from all categories
+        ctk.CTkLabel(
+            filter_bar,
+            text="Filter:",
+            font=("Segoe UI", 12, "bold"),
+        ).pack(side="left", padx=(15, 10), pady=12)
+
+        # Category pill buttons
+        categories = [
+            ("All Items", "🔍"),
+            ("Passwords", "🔑"),
+            ("API Keys", "🔐"),
+            ("Notes", "📝"),
+            ("SSH Keys", "🗝️"),
+            ("Files", "📄"),
+            ("Folders", "📁"),
+        ]
+
+        self.category_pill_buttons = {}
+
+        def switch_filter(category):
+            self.bulk_category_filter = category
+            for cat, btn in self.category_pill_buttons.items():
+                if cat == category:
+                    btn.configure(
+                        fg_color=COLORS["accent"],
+                        text_color=COLORS["text_primary"],
+                        border_color=COLORS["accent"],
+                    )
+                else:
+                    btn.configure(
+                        fg_color="transparent",
+                        text_color=COLORS["text_secondary"],
+                        border_color=COLORS["bg_secondary"],
+                    )
+            self.display_bulk_delete_items()
+
+        pills_container = ctk.CTkFrame(filter_bar, fg_color="transparent")
+        pills_container.pack(side="left", padx=(5, 10), pady=8)
+
+        for label, emoji in categories:
+            btn = ctk.CTkButton(
+                pills_container,
+                text=f"{emoji} {label}",
+                width=95,
+                height=32,
+                font=("Segoe UI", 11),
+                fg_color=COLORS["accent"] if label == "All Items" else "transparent",
+                hover_color=COLORS["accent_hover"],
+                text_color=(
+                    COLORS["text_primary"]
+                    if label == "All Items"
+                    else COLORS["text_secondary"]
+                ),
+                corner_radius=16,
+                border_width=1,
+                border_color=(
+                    COLORS["accent"] if label == "All Items" else COLORS["bg_secondary"]
+                ),
+                command=lambda c=label: switch_filter(c),
+            )
+            btn.pack(side="left", padx=3)
+            self.category_pill_buttons[label] = btn
+
+        # Items container - SCROLLABLE ONLY
+        self.bulk_items_scroll = ctk.CTkScrollableFrame(
+            self.items_container, fg_color="transparent"
+        )
+        self.bulk_items_scroll.pack(fill="both", expand=True)
+
+        # Display items
+        self.display_bulk_delete_items()
+
+    def display_bulk_delete_items(self):
+        """Display items in bulk delete view"""
+        # Clear existing
+        for widget in self.bulk_items_scroll.winfo_children():
+            widget.destroy()
+
+        # Get all items based on filter
         all_items_with_meta = []
+        filter_choice = self.bulk_category_filter
 
-        filter_choice = category_filter_var.get()
-
-        # Collect items based on filter
         if filter_choice in ["All Items", "Passwords"]:
             for item in self.vault.list_passwords():
                 all_items_with_meta.append(
@@ -1579,29 +1626,71 @@ class LockBoxUI:
             key=lambda x: x["item"].get("created", ""), reverse=True
         )
 
-        # Display items
+        # SIMPLE empty state - NO SCROLL, just centered text
         if not all_items_with_meta:
             ctk.CTkLabel(
-                self.items_container,
-                text="No items to display",
+                self.bulk_items_scroll,
+                text=f"No {filter_choice.lower()} to display",
                 font=("Segoe UI", 16),
                 text_color=COLORS["text_secondary"],
-            ).pack(pady=100)
+            ).pack(pady=150)
             return
 
-        # Display each item
+        # Select All checkbox at top
+        select_all_frame = ctk.CTkFrame(
+            self.bulk_items_scroll,
+            fg_color=COLORS["bg_card"],
+            corner_radius=10,
+            height=52,
+        )
+        select_all_frame.pack(fill="x", pady=(0, 12), padx=5, ipady=10, ipadx=15)
+        select_all_frame.pack_propagate(False)
+
+        select_all_var = tk.BooleanVar(value=False)
+
+        def update_selection_label():
+            count = len(self.bulk_selected)
+            self.selection_label.configure(
+                text=f"{count} item{'s' if count != 1 else ''} selected",
+                text_color=COLORS["accent"] if count > 0 else COLORS["text_secondary"],
+            )
+
+        def toggle_select_all():
+            if select_all_var.get():
+                self.bulk_selected = [
+                    item["checkbox_id"] for item in all_items_with_meta
+                ]
+                for item in all_items_with_meta:
+                    item["var"].set(True)
+            else:
+                self.bulk_selected = []
+                for item in all_items_with_meta:
+                    item["var"].set(False)
+            update_selection_label()
+
+        ctk.CTkCheckBox(
+            select_all_frame,
+            text=f"Select All ({len(all_items_with_meta)} items)",
+            variable=select_all_var,
+            font=("Segoe UI", 13, "bold"),
+            command=toggle_select_all,
+            checkbox_width=24,
+            checkbox_height=24,
+        ).pack(side="left", padx=15, pady=8)
+
+        # Display each item - MATCHING YOUR PASSWORD DESIGN
         for meta in all_items_with_meta:
             item = meta["item"]
             category = meta["category"]
 
             card = ctk.CTkFrame(
-                self.items_container, fg_color=COLORS["bg_card"], corner_radius=12
+                self.bulk_items_scroll, fg_color=COLORS["bg_card"], corner_radius=12
             )
-            card.pack(fill="x", pady=8, padx=10, ipady=12, ipadx=15)
+            card.pack(fill="x", pady=6, padx=5, ipady=12, ipadx=15)
 
-            # Top row with checkbox and title
+            # Top row - checkbox + badge + title
             top_row = ctk.CTkFrame(card, fg_color="transparent")
-            top_row.pack(fill="x", padx=5, pady=(0, 8))
+            top_row.pack(fill="x", pady=(0, 5))
 
             def on_checkbox_change(checkbox_id=meta["checkbox_id"], var=meta["var"]):
                 if var.get():
@@ -1610,8 +1699,9 @@ class LockBoxUI:
                 else:
                     if checkbox_id in self.bulk_selected:
                         self.bulk_selected.remove(checkbox_id)
-                update_count_label()
+                update_selection_label()
 
+            # Checkbox
             ctk.CTkCheckBox(
                 top_row,
                 text="",
@@ -1619,16 +1709,16 @@ class LockBoxUI:
                 command=on_checkbox_change,
                 checkbox_width=22,
                 checkbox_height=22,
-            ).pack(side="left", padx=(0, 10))
+            ).pack(side="left", padx=(5, 12))
 
-            # Category badge
+            # Category badge (small, subtle)
             ctk.CTkLabel(
                 top_row,
                 text=meta["category_label"],
-                font=("Segoe UI", 10, "bold"),
+                font=("Segoe UI", 9, "bold"),
                 text_color=COLORS["bg_primary"],
                 fg_color=COLORS["accent"],
-                corner_radius=6,
+                corner_radius=5,
                 padx=8,
                 pady=2,
             ).pack(side="left", padx=(0, 10))
@@ -1654,18 +1744,18 @@ class LockBoxUI:
                 font=("Segoe UI", 14, "bold"),
             ).pack(side="left")
 
-            # Info row
+            # Info row - exactly like your password section
             info_row = ctk.CTkFrame(card, fg_color="transparent")
             info_row.pack(fill="x", padx=5)
 
-            # Show category-specific info
             if category == "passwords":
+                username = item.get("username", "N/A")
                 ctk.CTkLabel(
                     info_row,
-                    text=f"👤 {item.get('username', 'N/A')}",
+                    text=f"👤 {username}",
                     font=("Segoe UI", 11),
                     text_color=COLORS["text_secondary"],
-                ).pack(side="left", padx=(30, 15))
+                ).pack(side="left", padx=(35, 15))
             elif category == "files":
                 size_kb = item.get("size", 0) / 1024
                 ctk.CTkLabel(
@@ -1673,16 +1763,19 @@ class LockBoxUI:
                     text=f"💾 {size_kb:.1f} KB",
                     font=("Segoe UI", 11),
                     text_color=COLORS["text_secondary"],
-                ).pack(side="left", padx=(30, 15))
+                ).pack(side="left", padx=(35, 15))
             elif category == "encrypted_folders":
                 ctk.CTkLabel(
                     info_row,
                     text=f"📊 {item.get('file_count', 0)} files",
                     font=("Segoe UI", 11),
                     text_color=COLORS["text_secondary"],
-                ).pack(side="left", padx=(30, 15))
+                ).pack(side="left", padx=(35, 15))
+            else:
+                # For other types, just add padding
+                ctk.CTkLabel(info_row, text="", width=35).pack(side="left")
 
-            # Date created
+            # Date
             created = item.get("created", "Unknown")
             if created != "Unknown" and len(created) > 10:
                 created = created[:10]

@@ -1,14 +1,13 @@
+import os
 from pathlib import Path
 
-# Application info
 APP_NAME = "LockBox"
-APP_VERSION = "2.1.0"
 
-# Directory paths
-DATA_DIR = Path(__file__).parent.parent / "data"
+DATA_DIR = Path(os.getenv("APPDATA")) / APP_NAME
 VAULT_FILE = DATA_DIR / "lockbox.vault"
 CONFIG_FILE = DATA_DIR / "config.json"
 BACKUP_DIR = DATA_DIR / "backups"
+
 
 # Vault structure
 EMPTY_VAULT = {

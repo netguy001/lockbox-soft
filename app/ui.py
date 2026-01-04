@@ -60,6 +60,17 @@ class LockBoxUI:
         self.show_login()
         self.setup_keyboard_shortcuts()
 
+        self.filter_options = [
+            "All Items",
+            "Passwords",
+            "API Keys",
+            "Notes",
+            "SSH Keys",
+            "2FA/TOTP",
+            "Files",
+            "Folders",
+        ]
+
     def setup_keyboard_shortcuts(self):
         """Setup global keyboard shortcuts"""
         self.app.bind("<Control-l>", lambda e: self.lock_vault())
@@ -647,12 +658,9 @@ class LockBoxUI:
                 self.search_close_btn.pack(side="right", padx=(5, 10))
 
                 self.search_visible = False
-        # Items container
-        self.items_container = ctk.CTkScrollableFrame(
-            self.content_area, fg_color="transparent"
-        )
+        # Items container (NON-SCROLLABLE - only bulk delete scrolls internally)
+        self.items_container = ctk.CTkFrame(self.content_area, fg_color="transparent")
         self.items_container.pack(fill="both", expand=True, padx=20, pady=(0, 20))
-
         self.display_items()
 
     def toggle_search(self):
@@ -1858,9 +1866,13 @@ class LockBoxUI:
         self.bulk_selected = []
         self.bulk_category_filter = "All Items"
 
+        # Create FIXED top controls container (doesn't scroll)
+        top_controls = ctk.CTkFrame(self.items_container, fg_color="transparent")
+        top_controls.pack(fill="x", padx=20, pady=(0, 10))
+
         # Top control bar - SINGLE clean header
         control_bar = ctk.CTkFrame(
-            self.items_container,
+            top_controls,  # ← CHANGED from self.items_container
             fg_color=COLORS["bg_card"],
             corner_radius=12,
             height=75,
@@ -1871,15 +1883,6 @@ class LockBoxUI:
         # Left side - Title and count
         left_side = ctk.CTkFrame(control_bar, fg_color="transparent")
         left_side.pack(side="left", fill="y", pady=8)
-
-        title_frame = ctk.CTkFrame(left_side, fg_color="transparent")
-        title_frame.pack(anchor="w")
-
-        ctk.CTkLabel(
-            title_frame,
-            text="🗑️ Bulk Delete",
-            font=("Segoe UI", 18, "bold"),
-        ).pack(side="left")
 
         self.selection_label = ctk.CTkLabel(
             left_side,
@@ -1948,35 +1951,25 @@ class LockBoxUI:
             command=delete_selected,
         ).pack(side="right", pady=8, padx=10)
 
-        # Category filter pills
-        filter_bar = ctk.CTkFrame(
-            self.items_container,
-            fg_color=COLORS["bg_card"],
-            corner_radius=12,
-            height=60,
-        )
-        filter_bar.pack(fill="x", pady=(0, 15), ipady=8, ipadx=20)
-        filter_bar.pack_propagate(False)
-
+        # Category filter pills (IN THE CONTROL BAR)
         ctk.CTkLabel(
-            filter_bar,
+            control_bar,
             text="Filter:",
-            font=("Segoe UI", 12, "bold"),
-        ).pack(side="left", padx=(15, 10), pady=12)
+            font=("Segoe UI", 11, "bold"),
+            text_color=COLORS["text_secondary"],
+        ).pack(side="left", padx=(20, 8))
 
         # Category pill buttons
-        categories = [
-            ("🔒 Passwords", "passwords"),
-            ("🔑 API Keys", "api_keys"),
-            ("📝 Secure Notes", "notes"),
-            ("🗝️ SSH Keys", "ssh_keys"),
-            ("🔐 2FA/TOTP", "totp_codes"),  # ← NEW
-            ("📄 Files", "files"),
-            ("📁 Folders", "encrypted_folders"),
-            ("📊 Security", "security"),
-            ("🗑️ Bulk Delete", "bulk_delete"),
+        self.filter_options = [
+            "All Items",
+            "Passwords",
+            "API Keys",
+            "Notes",
+            "SSH Keys",
+            "2FA/TOTP",
+            "Files",
+            "Folders",
         ]
-
         self.category_pill_buttons = {}
 
         def switch_filter(category):
@@ -1996,16 +1989,13 @@ class LockBoxUI:
                     )
             self.display_bulk_delete_items()
 
-        pills_container = ctk.CTkFrame(filter_bar, fg_color="transparent")
-        pills_container.pack(side="left", padx=(5, 10), pady=8)
-
-        for label, emoji in categories:
+        for label in self.filter_options:
             btn = ctk.CTkButton(
-                pills_container,
-                text=f"{emoji} {label}",
-                width=95,
-                height=32,
-                font=("Segoe UI", 11),
+                control_bar,  # ← DIRECT TO CONTROL BAR
+                text=label,
+                width=90,
+                height=30,
+                font=("Segoe UI", 10),
                 fg_color=COLORS["accent"] if label == "All Items" else "transparent",
                 hover_color=COLORS["accent_hover"],
                 text_color=(
@@ -2013,21 +2003,21 @@ class LockBoxUI:
                     if label == "All Items"
                     else COLORS["text_secondary"]
                 ),
-                corner_radius=16,
+                corner_radius=15,
                 border_width=1,
                 border_color=(
                     COLORS["accent"] if label == "All Items" else COLORS["bg_secondary"]
                 ),
                 command=lambda c=label: switch_filter(c),
             )
-            btn.pack(side="left", padx=3)
+            btn.pack(side="left", padx=2)
             self.category_pill_buttons[label] = btn
 
         # Items container - SCROLLABLE ONLY
         self.bulk_items_scroll = ctk.CTkScrollableFrame(
             self.items_container, fg_color="transparent"
         )
-        self.bulk_items_scroll.pack(fill="both", expand=True)
+        self.bulk_items_scroll.pack(fill="both", expand=True, padx=20, pady=10)
 
         # Display items
         self.display_bulk_delete_items()
@@ -2047,7 +2037,7 @@ class LockBoxUI:
                 all_items_with_meta.append(
                     {
                         "category": "passwords",
-                        "category_label": "🔑 Password",
+                        "category_label": "🔒 Password",
                         "item": item,
                         "checkbox_id": f"passwords:{item['id']}",
                         "var": tk.BooleanVar(value=False),
@@ -2126,7 +2116,9 @@ class LockBoxUI:
                 text=f"No {filter_choice.lower()} to display",
                 font=("Segoe UI", 16),
                 text_color=COLORS["text_secondary"],
-            ).pack(pady=150)
+            ).pack(
+                expand=True
+            )  # ← CHANGED: removed pady, added expand
             return
 
         # Select All checkbox at top
@@ -2177,9 +2169,15 @@ class LockBoxUI:
             category = meta["category"]
 
             card = ctk.CTkFrame(
-                self.bulk_items_scroll, fg_color=COLORS["bg_card"], corner_radius=12
+                self.bulk_items_scroll,
+                fg_color=COLORS["bg_card"],
+                corner_radius=12,
+                height=80,  # ← ADD THIS
             )
-            card.pack(fill="x", pady=6, padx=5, ipady=12, ipadx=15)
+            card.pack(
+                fill="x", pady=8, padx=10, ipady=15, ipadx=20
+            )  # ← Increased padding
+            card.pack_propagate(False)  # ← ADD THIS LINE
 
             # Top row - checkbox + badge + title
             top_row = ctk.CTkFrame(card, fg_color="transparent")
@@ -2202,7 +2200,7 @@ class LockBoxUI:
                 command=on_checkbox_change,
                 checkbox_width=22,
                 checkbox_height=22,
-            ).pack(side="left", padx=(5, 12))
+            ).pack(side="left", padx=(15, 12))
 
             # Category badge (small, subtle)
             ctk.CTkLabel(

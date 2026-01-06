@@ -1,7 +1,7 @@
+.venv/
 __pycache__/
 *.pyc
 build/
-data/
-lockbox.vault
 dist/
-.venv/
+*.exe
+*.spec

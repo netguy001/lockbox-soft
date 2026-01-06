@@ -884,14 +884,20 @@ class LockBoxUI(LoginViewMixin):
             username = item.get("username", "")
             url = item.get("url", "")
 
-            # Username is display-only (not clickable)
+            # Username with label
             if username:
+                ctk.CTkLabel(
+                    meta,
+                    text="👤",
+                    font=FONT["small"],
+                    text_color=COLORS["text_muted"],
+                ).pack(side="left")
                 ctk.CTkLabel(
                     meta,
                     text=username,
                     font=FONT["small"],
                     text_color=COLORS["text_muted"],
-                ).pack(side="left")
+                ).pack(side="left", padx=(4, 0))
 
             if username and url:
                 ctk.CTkLabel(
@@ -901,8 +907,14 @@ class LockBoxUI(LoginViewMixin):
                     text_color=COLORS["text_muted"],
                 ).pack(side="left")
 
-            # URL is clickable (underlined style hint)
+            # URL with icon (clickable)
             if url:
+                ctk.CTkLabel(
+                    meta,
+                    text="🔗",
+                    font=FONT["small"],
+                    text_color=COLORS["text_muted"],
+                ).pack(side="left")
                 display_url = (
                     url.replace("https://", "").replace("http://", "").rstrip("/")
                 )
@@ -915,7 +927,7 @@ class LockBoxUI(LoginViewMixin):
                     text_color=COLORS["accent"],
                     cursor="hand2",
                 )
-                url_label.pack(side="left")
+                url_label.pack(side="left", padx=(4, 0))
                 url_label.bind("<Button-1>", lambda e, u=url: self.open_url(u))
                 url_label.bind(
                     "<Enter>",

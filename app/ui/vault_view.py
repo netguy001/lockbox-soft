@@ -746,9 +746,12 @@ class LockBoxUI(LoginViewMixin):
 
     def display_items(self):
         """Display items for current category"""
-        # Freeze the container to prevent layout glitches during rebuild
+        # Hide container during rebuild to prevent flicker
         if hasattr(self, "items_container"):
-            self.items_container.pack_propagate(False)
+            try:
+                self.items_container.pack_forget()
+            except:
+                pass
 
         for widget in self.items_container.winfo_children():
             widget.destroy()
@@ -823,9 +826,11 @@ class LockBoxUI(LoginViewMixin):
                 text_color=COLORS["text_secondary"],
             ).pack(pady=100)
 
-        # Re-enable pack propagation after rebuild
+        # Show container after rebuild is complete
         if hasattr(self, "items_container"):
-            self.items_container.pack_propagate(True)
+            # Force all widget rendering to complete before displaying
+            self.items_container.update_idletasks()
+            self.items_container.pack(fill="both", expand=True)
 
     def toggle_search(self):
         """Toggle search bar between icon and expanded state"""
@@ -1160,7 +1165,7 @@ class LockBoxUI(LoginViewMixin):
                 text="•••",
                 width=40,
                 height=32,
-                font=("Segoe UI", 11),
+                font=("Segoe UI", 16),
                 fg_color="transparent",
                 hover_color=COLORS["bg_hover"],
                 text_color=COLORS["text_muted"],

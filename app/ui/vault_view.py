@@ -696,7 +696,8 @@ class LockBoxUI(LoginViewMixin):
         }
 
         self.sort_by = sort_map.get(choice, "created_desc")
-        self.display_items()
+        # Defer refresh to avoid layout glitch
+        self.app.after(10, self.display_items)
 
     def sort_items(self, items):
         """Sort items based on current sort setting"""
@@ -745,6 +746,10 @@ class LockBoxUI(LoginViewMixin):
 
     def display_items(self):
         """Display items for current category"""
+        # Freeze the container to prevent layout glitches during rebuild
+        if hasattr(self, "items_container"):
+            self.items_container.pack_propagate(False)
+
         for widget in self.items_container.winfo_children():
             widget.destroy()
 
@@ -818,6 +823,10 @@ class LockBoxUI(LoginViewMixin):
                 text_color=COLORS["text_secondary"],
             ).pack(pady=100)
 
+        # Re-enable pack propagation after rebuild
+        if hasattr(self, "items_container"):
+            self.items_container.pack_propagate(True)
+
     def toggle_search(self):
         """Toggle search bar between icon and expanded state"""
         if self.search_expanded:
@@ -855,6 +864,8 @@ class LockBoxUI(LoginViewMixin):
         """Force collapse the search bar, clearing any text"""
         if not self.search_expanded:
             return
+        # Check if we need to refresh (only if there was search text)
+        had_search_text = bool(self.search_var.get().strip())
         self.search_var.set("")  # Clear the search text
         self.search_expanded = False
         self.search_close_btn.pack_forget()
@@ -862,7 +873,9 @@ class LockBoxUI(LoginViewMixin):
         self.search_icon_label.pack_forget()
         self.search_frame.pack_forget()
         self.search_icon_btn.pack(side="left")
-        self.on_search_change()  # Refresh the list
+        # Only refresh if there was search text to clear
+        if had_search_text:
+            self.app.after(50, self.display_items)
 
     def check_collapse_search(self):
         """Check if we should collapse search on focus out"""

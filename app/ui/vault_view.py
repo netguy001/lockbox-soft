@@ -499,17 +499,50 @@ class LockBoxUI(LoginViewMixin):
                     pass
             self.search_var = tk.StringVar()
 
-            search_frame = ctk.CTkFrame(
+            # Search icon button (collapsed state)
+            self.search_expanded = False
+
+            self.search_container = ctk.CTkFrame(
                 actions,
+                fg_color="transparent",
+            )
+            self.search_container.pack(side="left", padx=(0, SP["sm"]))
+
+            self.search_icon_btn = ctk.CTkButton(
+                self.search_container,
+                text="🔍",
+                width=CTL["h"],
+                height=CTL["h"],
+                font=("Segoe UI", 14),
+                fg_color=COLORS["bg_card"],
+                hover_color=COLORS["bg_hover"],
+                text_color=COLORS["text_secondary"],
+                border_width=1,
+                border_color=COLORS["border"],
+                corner_radius=RAD["md"],
+                command=self.toggle_search,
+            )
+            self.search_icon_btn.pack(side="left")
+
+            # Search frame (expanded state - hidden initially)
+            self.search_frame = ctk.CTkFrame(
+                self.search_container,
                 fg_color=COLORS["bg_card"],
                 corner_radius=RAD["md"],
                 border_width=1,
-                border_color=COLORS["border"],
+                border_color=COLORS["accent"],
             )
-            search_frame.pack(side="left", padx=(0, SP["sm"]))
+
+            # Search icon inside expanded frame
+            self.search_icon_label = ctk.CTkLabel(
+                self.search_frame,
+                text="🔍",
+                font=("Segoe UI", 14),
+                text_color=COLORS["text_muted"],
+            )
 
             self.search_entry = ctk.CTkEntry(
-                search_frame,
+                self.search_frame,
                 textvariable=self.search_var,
                 width=180,
                 height=CTL["h"] - 4,
@@ -520,8 +553,22 @@ class LockBoxUI(LoginViewMixin):
                 border_width=0,
                 fg_color="transparent",
             )
-            self.search_entry.pack(side="left", padx=SP["sm"], pady=2)
             self.search_entry.bind("<KeyRelease>", lambda e: self.on_search_change())
+            self.search_entry.bind("<Escape>", lambda e: self.force_collapse_search())
+
+            # Close button for search
+            self.search_close_btn = ctk.CTkButton(
+                self.search_frame,
+                text="✕",
+                width=28,
+                height=28,
+                font=("Segoe UI", 12),
+                fg_color="transparent",
+                hover_color=COLORS["bg_hover"],
+                text_color=COLORS["text_muted"],
+                corner_radius=RAD["sm"],
+                command=self.force_collapse_search,
+            )
 
             # Sort dropdown
             sort_options = ["Newest", "Oldest", "A-Z", "Z-A", "Modified"]
@@ -770,6 +817,70 @@ class LockBoxUI(LoginViewMixin):
                 font=("Segoe UI", 16),
                 text_color=COLORS["text_secondary"],
             ).pack(pady=100)
+
+    def toggle_search(self):
+        """Toggle search bar between icon and expanded state"""
+        if self.search_expanded:
+            self.collapse_search()
+        else:
+            self.expand_search()
+
+    def expand_search(self):
+        """Expand the search bar"""
+        if self.search_expanded:
+            return
+        self.search_expanded = True
+        self.search_icon_btn.pack_forget()
+        self.search_frame.pack(side="left")
+        self.search_icon_label.pack(side="left", padx=(SP["sm"], 0))
+        self.search_entry.pack(side="left", padx=(4, 0), pady=2)
+        self.search_close_btn.pack(side="left", padx=(0, SP["xs"]))
+        self.search_entry.focus_set()
+
+    def collapse_search(self):
+        """Collapse the search bar back to icon"""
+        if not self.search_expanded:
+            return
+        # Only collapse if search is empty
+        if self.search_var.get().strip():
+            return
+        self.search_expanded = False
+        self.search_close_btn.pack_forget()
+        self.search_entry.pack_forget()
+        self.search_icon_label.pack_forget()
+        self.search_frame.pack_forget()
+        self.search_icon_btn.pack(side="left")
+
+    def force_collapse_search(self):
+        """Force collapse the search bar, clearing any text"""
+        if not self.search_expanded:
+            return
+        self.search_var.set("")  # Clear the search text
+        self.search_expanded = False
+        self.search_close_btn.pack_forget()
+        self.search_entry.pack_forget()
+        self.search_icon_label.pack_forget()
+        self.search_frame.pack_forget()
+        self.search_icon_btn.pack(side="left")
+        self.on_search_change()  # Refresh the list
+
+    def check_collapse_search(self):
+        """Check if we should collapse search on focus out"""
+        # Don't collapse if there's text in the search
+        if hasattr(self, "search_var") and self.search_var.get().strip():
+            return
+        # Check if focus is still within the search widgets
+        try:
+            focused = self.app.focus_get()
+            if focused in [
+                self.search_entry,
+                self.search_frame,
+                self.search_icon_label,
+            ]:
+                return
+        except:
+            pass
+        self.collapse_search()
 
     def on_search_change(self):
         """Handle search input changes"""

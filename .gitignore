@@ -4,3 +4,4 @@ build/
 data/
 lockbox.vault
 dist/
+.venv/

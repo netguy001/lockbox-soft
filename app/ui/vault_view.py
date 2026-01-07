@@ -341,7 +341,7 @@ class LockBoxUI(LoginViewMixin):
         bottom_actions = [
             ("Backup", self.show_backup_dialog, "💾"),
             ("Restore", self.show_restore_dialog, "📥"),
-            ("Settings", self.show_change_master_password, "⚙"),
+            ("Settings", self.show_settings_page, "⚙"),
         ]
         for label, cmd, icon in bottom_actions:
             btn = ctk.CTkButton(
@@ -2157,13 +2157,39 @@ class LockBoxUI(LoginViewMixin):
             text_color=strength_color,
         ).pack(side="right")
 
-        # Content container for sections
-        content_container = ctk.CTkFrame(self.items_container, fg_color="transparent")
-        content_container.pack(fill="both", expand=True)
-
+        # Hint text for improving security
         weak_count = len(report["weak_passwords"])
         reused_count = len(report["reused_passwords"])
         old_count = len(report["old_passwords"])
+
+        hint_parts = []
+        if weak_count > 0:
+            hint_parts.append(
+                f"Fix {weak_count} weak password{'s' if weak_count != 1 else ''}"
+            )
+        if reused_count > 0:
+            hint_parts.append(
+                f"change {reused_count} reused password{'s' if reused_count != 1 else ''}"
+            )
+        if old_count > 0:
+            hint_parts.append(
+                f"refresh {old_count} old password{'s' if old_count != 1 else ''}"
+            )
+
+        if hint_parts:
+            hint_text = " • ".join(hint_parts) + " to improve security"
+            hint_frame = ctk.CTkFrame(strength_card, fg_color="transparent")
+            hint_frame.pack(fill="x", padx=SP["lg"], pady=(0, SP["md"]))
+            ctk.CTkLabel(
+                hint_frame,
+                text=f"💡 {hint_text}",
+                font=FONT["small"],
+                text_color=COLORS["text_muted"],
+            ).pack(anchor="w")
+
+        # Content container for sections
+        content_container = ctk.CTkFrame(self.items_container, fg_color="transparent")
+        content_container.pack(fill="both", expand=True)
 
         # Weak passwords section
         if report["weak_passwords"]:
@@ -2196,6 +2222,25 @@ class LockBoxUI(LoginViewMixin):
 
                 item_content = ctk.CTkFrame(item_row, fg_color="transparent")
                 item_content.pack(fill="x", padx=SP["md"], pady=SP["sm"])
+
+                # Red accent bar on the left for weak passwords
+                accent_bar = ctk.CTkFrame(
+                    item_content,
+                    width=3,
+                    height=20,
+                    corner_radius=2,
+                    fg_color=COLORS["danger"],
+                )
+                accent_bar.pack(side="left", padx=(0, SP["sm"]))
+                accent_bar.pack_propagate(False)
+
+                # Warning icon
+                ctk.CTkLabel(
+                    item_content,
+                    text="⚠",
+                    font=FONT["small"],
+                    text_color=COLORS["danger"],
+                ).pack(side="left", padx=(0, SP["xs"]))
 
                 ctk.CTkLabel(
                     item_content,
@@ -4264,36 +4309,581 @@ class LockBoxUI(LoginViewMixin):
             command=dialog.destroy,
         ).pack(pady=(0, 20))
 
-    def show_change_master_password(self):
-        """Change master password dialog"""
+    def show_settings_page(self):
+        """Display the Settings page with all configuration options"""
         self.reset_activity()
-        dialog = self.create_dialog("Change Master Password", 450, 400)
+
+        # Create settings dialog
+        dialog = self.create_dialog("Settings", 520, 620)
+        dialog.configure(fg_color=COLORS["bg_primary"])
+
+        # Main scrollable container
+        main_scroll = ctk.CTkScrollableFrame(
+            dialog,
+            fg_color="transparent",
+            scrollbar_button_color=COLORS["bg_hover"],
+            scrollbar_button_hover_color=COLORS["accent"],
+        )
+        main_scroll.pack(fill="both", expand=True, padx=SP["lg"], pady=SP["lg"])
+
+        # Header
+        ctk.CTkLabel(
+            main_scroll,
+            text="⚙️ Settings",
+            font=FONT["h1"],
+            text_color=COLORS["text_primary"],
+        ).pack(anchor="w", pady=(0, SP["lg"]))
+
+        # ═══════════════════════════════════════════════════════════════
+        # APPEARANCE SECTION
+        # ═══════════════════════════════════════════════════════════════
+        appearance_section = ctk.CTkFrame(
+            main_scroll,
+            fg_color=COLORS["bg_card"],
+            corner_radius=RAD["md"],
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        appearance_section.pack(fill="x", pady=(0, SP["md"]))
+
+        appearance_header = ctk.CTkFrame(appearance_section, fg_color="transparent")
+        appearance_header.pack(fill="x", padx=SP["lg"], pady=SP["md"])
 
         ctk.CTkLabel(
-            dialog, text="Change Master Password", font=("Segoe UI", 18, "bold")
-        ).pack(pady=20)
+            appearance_header,
+            text="🎨 Appearance",
+            font=FONT["h3"],
+            text_color=COLORS["text_primary"],
+        ).pack(side="left")
 
-        old_pwd = ctk.CTkEntry(
-            dialog, width=350, height=40, placeholder_text="Current Password", show="●"
+        appearance_content = ctk.CTkFrame(appearance_section, fg_color="transparent")
+        appearance_content.pack(fill="x", padx=SP["lg"], pady=(0, SP["md"]))
+
+        # Theme selector
+        theme_row = ctk.CTkFrame(appearance_content, fg_color="transparent")
+        theme_row.pack(fill="x", pady=SP["xs"])
+
+        ctk.CTkLabel(
+            theme_row,
+            text="Theme",
+            font=FONT["body"],
+            text_color=COLORS["text_secondary"],
+        ).pack(side="left")
+
+        theme_var = ctk.StringVar(value="Dark")
+        theme_menu = ctk.CTkOptionMenu(
+            theme_row,
+            values=["System", "Dark", "Light"],
+            variable=theme_var,
+            width=120,
+            height=CTL["h"] - 8,
+            font=FONT["body"],
+            fg_color=COLORS["bg_hover"],
+            button_color=COLORS["bg_hover"],
+            button_hover_color=COLORS["accent"],
+            dropdown_fg_color=COLORS["bg_card"],
+            corner_radius=RAD["sm"],
+            command=lambda v: ctk.set_appearance_mode(v.lower()),
         )
-        old_pwd.pack(pady=10)
+        theme_menu.pack(side="right")
+
+        # Accent color (visual only, placeholder)
+        accent_row = ctk.CTkFrame(appearance_content, fg_color="transparent")
+        accent_row.pack(fill="x", pady=SP["xs"])
+
+        ctk.CTkLabel(
+            accent_row,
+            text="Accent Color",
+            font=FONT["body"],
+            text_color=COLORS["text_secondary"],
+        ).pack(side="left")
+
+        accent_colors = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6"]
+        accent_frame = ctk.CTkFrame(accent_row, fg_color="transparent")
+        accent_frame.pack(side="right")
+
+        for color in accent_colors:
+            color_btn = ctk.CTkButton(
+                accent_frame,
+                text="",
+                width=24,
+                height=24,
+                fg_color=color,
+                hover_color=color,
+                corner_radius=12,
+                command=lambda c=color: None,  # Placeholder
+            )
+            color_btn.pack(side="left", padx=2)
+
+        # ═══════════════════════════════════════════════════════════════
+        # SECURITY SECTION
+        # ═══════════════════════════════════════════════════════════════
+        security_section = ctk.CTkFrame(
+            main_scroll,
+            fg_color=COLORS["bg_card"],
+            corner_radius=RAD["md"],
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        security_section.pack(fill="x", pady=(0, SP["md"]))
+
+        security_header = ctk.CTkFrame(security_section, fg_color="transparent")
+        security_header.pack(fill="x", padx=SP["lg"], pady=SP["md"])
+
+        ctk.CTkLabel(
+            security_header,
+            text="🔒 Security",
+            font=FONT["h3"],
+            text_color=COLORS["text_primary"],
+        ).pack(side="left")
+
+        security_content = ctk.CTkFrame(security_section, fg_color="transparent")
+        security_content.pack(fill="x", padx=SP["lg"], pady=(0, SP["md"]))
+
+        # Auto-lock timeout
+        autolock_row = ctk.CTkFrame(security_content, fg_color="transparent")
+        autolock_row.pack(fill="x", pady=SP["xs"])
+
+        ctk.CTkLabel(
+            autolock_row,
+            text="Auto-lock after inactivity",
+            font=FONT["body"],
+            text_color=COLORS["text_secondary"],
+        ).pack(side="left")
+
+        autolock_var = ctk.StringVar(value="10 min")
+        autolock_menu = ctk.CTkOptionMenu(
+            autolock_row,
+            values=["5 min", "10 min", "15 min", "30 min", "Never"],
+            variable=autolock_var,
+            width=100,
+            height=CTL["h"] - 8,
+            font=FONT["body"],
+            fg_color=COLORS["bg_hover"],
+            button_color=COLORS["bg_hover"],
+            button_hover_color=COLORS["accent"],
+            dropdown_fg_color=COLORS["bg_card"],
+            corner_radius=RAD["sm"],
+        )
+        autolock_menu.pack(side="right")
+
+        # Clipboard clear
+        clipboard_row = ctk.CTkFrame(security_content, fg_color="transparent")
+        clipboard_row.pack(fill="x", pady=SP["xs"])
+
+        ctk.CTkLabel(
+            clipboard_row,
+            text="Clear clipboard after copy",
+            font=FONT["body"],
+            text_color=COLORS["text_secondary"],
+        ).pack(side="left")
+
+        clipboard_var = ctk.StringVar(value="15 sec")
+        clipboard_menu = ctk.CTkOptionMenu(
+            clipboard_row,
+            values=["10 sec", "15 sec", "30 sec", "1 min", "Never"],
+            variable=clipboard_var,
+            width=100,
+            height=CTL["h"] - 8,
+            font=FONT["body"],
+            fg_color=COLORS["bg_hover"],
+            button_color=COLORS["bg_hover"],
+            button_hover_color=COLORS["accent"],
+            dropdown_fg_color=COLORS["bg_card"],
+            corner_radius=RAD["sm"],
+        )
+        clipboard_menu.pack(side="right")
+
+        # Change Master Password button
+        pwd_row = ctk.CTkFrame(security_content, fg_color="transparent")
+        pwd_row.pack(fill="x", pady=(SP["sm"], 0))
+
+        ctk.CTkLabel(
+            pwd_row,
+            text="Master Password",
+            font=FONT["body"],
+            text_color=COLORS["text_secondary"],
+        ).pack(side="left")
+
+        ctk.CTkButton(
+            pwd_row,
+            text="Change Password",
+            width=140,
+            height=CTL["h"] - 8,
+            font=FONT["button"],
+            fg_color=COLORS["bg_hover"],
+            hover_color=COLORS["accent"],
+            text_color=COLORS["text_primary"],
+            border_width=1,
+            border_color=COLORS["border"],
+            corner_radius=RAD["sm"],
+            command=lambda: [dialog.destroy(), self.show_change_master_password()],
+        ).pack(side="right")
+
+        # ═══════════════════════════════════════════════════════════════
+        # VAULT SETTINGS SECTION
+        # ═══════════════════════════════════════════════════════════════
+        vault_section = ctk.CTkFrame(
+            main_scroll,
+            fg_color=COLORS["bg_card"],
+            corner_radius=RAD["md"],
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        vault_section.pack(fill="x", pady=(0, SP["md"]))
+
+        vault_header = ctk.CTkFrame(vault_section, fg_color="transparent")
+        vault_header.pack(fill="x", padx=SP["lg"], pady=SP["md"])
+
+        ctk.CTkLabel(
+            vault_header,
+            text="🗄️ Vault",
+            font=FONT["h3"],
+            text_color=COLORS["text_primary"],
+        ).pack(side="left")
+
+        vault_content = ctk.CTkFrame(vault_section, fg_color="transparent")
+        vault_content.pack(fill="x", padx=SP["lg"], pady=(0, SP["md"]))
+
+        # Export vault
+        export_row = ctk.CTkFrame(vault_content, fg_color="transparent")
+        export_row.pack(fill="x", pady=SP["xs"])
+
+        ctk.CTkLabel(
+            export_row,
+            text="Export vault backup",
+            font=FONT["body"],
+            text_color=COLORS["text_secondary"],
+        ).pack(side="left")
+
+        ctk.CTkButton(
+            export_row,
+            text="Export",
+            width=80,
+            height=CTL["h"] - 8,
+            font=FONT["button"],
+            fg_color=COLORS["bg_hover"],
+            hover_color=COLORS["accent"],
+            text_color=COLORS["text_primary"],
+            border_width=1,
+            border_color=COLORS["border"],
+            corner_radius=RAD["sm"],
+            command=lambda: [dialog.destroy(), self.show_backup_dialog()],
+        ).pack(side="right")
+
+        # Danger zone divider
+        danger_divider = ctk.CTkFrame(
+            vault_content, height=1, fg_color=COLORS["border"]
+        )
+        danger_divider.pack(fill="x", pady=SP["md"])
+
+        ctk.CTkLabel(
+            vault_content,
+            text="⚠️ Danger Zone",
+            font=FONT["small"],
+            text_color=COLORS["danger"],
+        ).pack(anchor="w", pady=(0, SP["sm"]))
+
+        # Delete vault
+        delete_row = ctk.CTkFrame(vault_content, fg_color="transparent")
+        delete_row.pack(fill="x", pady=SP["xs"])
+
+        ctk.CTkLabel(
+            delete_row,
+            text="Delete vault permanently",
+            font=FONT["body"],
+            text_color=COLORS["text_secondary"],
+        ).pack(side="left")
+
+        def confirm_delete_vault():
+            """Confirm vault deletion with password"""
+            dialog.destroy()
+            self._show_delete_vault_confirm()
+
+        ctk.CTkButton(
+            delete_row,
+            text="Delete Vault",
+            width=110,
+            height=CTL["h"] - 8,
+            font=FONT["button"],
+            fg_color=COLORS["danger"],
+            hover_color="#dc2626",
+            text_color="#ffffff",
+            corner_radius=RAD["sm"],
+            command=confirm_delete_vault,
+        ).pack(side="right")
+
+        # ═══════════════════════════════════════════════════════════════
+        # ADVANCED SECTION
+        # ═══════════════════════════════════════════════════════════════
+        advanced_section = ctk.CTkFrame(
+            main_scroll,
+            fg_color=COLORS["bg_card"],
+            corner_radius=RAD["md"],
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        advanced_section.pack(fill="x", pady=(0, SP["md"]))
+
+        advanced_header = ctk.CTkFrame(advanced_section, fg_color="transparent")
+        advanced_header.pack(fill="x", padx=SP["lg"], pady=SP["md"])
+
+        ctk.CTkLabel(
+            advanced_header,
+            text="🔧 Advanced",
+            font=FONT["h3"],
+            text_color=COLORS["text_primary"],
+        ).pack(side="left")
+
+        advanced_content = ctk.CTkFrame(advanced_section, fg_color="transparent")
+        advanced_content.pack(fill="x", padx=SP["lg"], pady=(0, SP["md"]))
+
+        # Reset UI layout
+        reset_row = ctk.CTkFrame(advanced_content, fg_color="transparent")
+        reset_row.pack(fill="x", pady=SP["xs"])
+
+        ctk.CTkLabel(
+            reset_row,
+            text="Reset UI layout",
+            font=FONT["body"],
+            text_color=COLORS["text_secondary"],
+        ).pack(side="left")
+
+        def reset_ui():
+            self.sidebar_collapsed = False
+            self._apply_sidebar_state()
+            messagebox.showinfo("Reset", "UI layout has been reset.")
+
+        ctk.CTkButton(
+            reset_row,
+            text="Reset",
+            width=80,
+            height=CTL["h"] - 8,
+            font=FONT["button"],
+            fg_color=COLORS["bg_hover"],
+            hover_color=COLORS["accent"],
+            text_color=COLORS["text_primary"],
+            border_width=1,
+            border_color=COLORS["border"],
+            corner_radius=RAD["sm"],
+            command=reset_ui,
+        ).pack(side="right")
+
+        # Clear cache
+        cache_row = ctk.CTkFrame(advanced_content, fg_color="transparent")
+        cache_row.pack(fill="x", pady=SP["xs"])
+
+        ctk.CTkLabel(
+            cache_row,
+            text="Clear temporary data",
+            font=FONT["body"],
+            text_color=COLORS["text_secondary"],
+        ).pack(side="left")
+
+        def clear_cache():
+            # Clear internal caches
+            if hasattr(self, "_totp_cards"):
+                delattr(self, "_totp_cards")
+            if hasattr(self, "bulk_selected"):
+                self.bulk_selected = []
+            messagebox.showinfo("Cleared", "Temporary data has been cleared.")
+
+        ctk.CTkButton(
+            cache_row,
+            text="Clear",
+            width=80,
+            height=CTL["h"] - 8,
+            font=FONT["button"],
+            fg_color=COLORS["bg_hover"],
+            hover_color=COLORS["accent"],
+            text_color=COLORS["text_primary"],
+            border_width=1,
+            border_color=COLORS["border"],
+            corner_radius=RAD["sm"],
+            command=clear_cache,
+        ).pack(side="right")
+
+        # Close button
+        ctk.CTkButton(
+            main_scroll,
+            text="Close",
+            width=120,
+            height=CTL["h"],
+            font=FONT["button"],
+            fg_color="transparent",
+            hover_color=COLORS["bg_hover"],
+            text_color=COLORS["text_secondary"],
+            border_width=1,
+            border_color=COLORS["border"],
+            corner_radius=RAD["md"],
+            command=dialog.destroy,
+        ).pack(pady=(SP["md"], 0))
+
+    def _show_delete_vault_confirm(self):
+        """Show delete vault confirmation dialog with password requirement"""
+        dialog = self.create_dialog("Delete Vault", 400, 320)
+        dialog.configure(fg_color=COLORS["bg_primary"])
+
+        content = ctk.CTkFrame(dialog, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=SP["xl"], pady=SP["lg"])
+
+        # Warning header
+        ctk.CTkLabel(
+            content,
+            text="⚠️ Delete Vault",
+            font=FONT["h2"],
+            text_color=COLORS["danger"],
+        ).pack(pady=(SP["md"], SP["sm"]))
+
+        ctk.CTkLabel(
+            content,
+            text="This action cannot be undone.\nAll data will be permanently deleted.",
+            font=FONT["body"],
+            text_color=COLORS["text_secondary"],
+            justify="center",
+        ).pack(pady=(0, SP["lg"]))
+
+        # Password confirmation
+        pwd_entry = ctk.CTkEntry(
+            content,
+            width=300,
+            height=CTL["h"],
+            placeholder_text="Enter Master Password to confirm",
+            show="●",
+            fg_color=COLORS["bg_card"],
+            border_color=COLORS["border"],
+            corner_radius=RAD["md"],
+        )
+        pwd_entry.pack(pady=(0, SP["sm"]))
+
+        status = ctk.CTkLabel(content, text="", font=FONT["small"])
+        status.pack(pady=SP["xs"])
+
+        def delete_vault():
+            password = pwd_entry.get()
+            if not password:
+                status.configure(
+                    text="❌ Password required", text_color=COLORS["danger"]
+                )
+                return
+
+            # Verify password
+            if not self.vault.verify_password(password):
+                status.configure(
+                    text="❌ Invalid password", text_color=COLORS["danger"]
+                )
+                return
+
+            # Delete the vault file
+            try:
+                import os
+                from app.constants import VAULT_FILE, DATA_DIR
+
+                if VAULT_FILE.exists():
+                    os.remove(VAULT_FILE)
+
+                # Also remove recovery files
+                recovery_file = DATA_DIR / "recovery.json"
+                if recovery_file.exists():
+                    os.remove(recovery_file)
+
+                dialog.destroy()
+                messagebox.showinfo(
+                    "Deleted", "Vault has been deleted. The application will now close."
+                )
+                self.app.quit()
+            except Exception as e:
+                status.configure(text=f"❌ {str(e)}", text_color=COLORS["danger"])
+
+        # Action buttons
+        btn_frame = ctk.CTkFrame(content, fg_color="transparent")
+        btn_frame.pack(fill="x", pady=(SP["md"], 0))
+
+        ctk.CTkButton(
+            btn_frame,
+            text="Cancel",
+            width=100,
+            height=CTL["h"],
+            font=FONT["button"],
+            fg_color="transparent",
+            hover_color=COLORS["bg_hover"],
+            text_color=COLORS["text_secondary"],
+            border_width=1,
+            border_color=COLORS["border"],
+            corner_radius=RAD["md"],
+            command=dialog.destroy,
+        ).pack(side="left")
+
+        ctk.CTkButton(
+            btn_frame,
+            text="Delete Vault",
+            width=140,
+            height=CTL["h"],
+            font=FONT["button"],
+            fg_color=COLORS["danger"],
+            hover_color="#dc2626",
+            text_color="#ffffff",
+            corner_radius=RAD["md"],
+            command=delete_vault,
+        ).pack(side="right")
+
+    def show_change_master_password(self):
+        """Change master password dialog - compact and focused"""
+        self.reset_activity()
+        dialog = self.create_dialog("Change Master Password", 380, 360)
+        dialog.configure(fg_color=COLORS["bg_primary"])
+
+        # Content container with padding
+        content = ctk.CTkFrame(dialog, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=SP["xl"], pady=SP["lg"])
+
+        # Header with icon
+        ctk.CTkLabel(
+            content,
+            text="🔐 Change Master Password",
+            font=FONT["h2"],
+            text_color=COLORS["text_primary"],
+        ).pack(pady=(SP["md"], SP["lg"]))
+
+        # Form fields
+        old_pwd = ctk.CTkEntry(
+            content,
+            width=300,
+            height=CTL["h"],
+            placeholder_text="Current Password",
+            show="●",
+            fg_color=COLORS["bg_card"],
+            border_color=COLORS["border"],
+            corner_radius=RAD["md"],
+        )
+        old_pwd.pack(pady=(0, SP["sm"]))
 
         new_pwd = ctk.CTkEntry(
-            dialog, width=350, height=40, placeholder_text="New Password", show="●"
+            content,
+            width=300,
+            height=CTL["h"],
+            placeholder_text="New Password",
+            show="●",
+            fg_color=COLORS["bg_card"],
+            border_color=COLORS["border"],
+            corner_radius=RAD["md"],
         )
-        new_pwd.pack(pady=10)
+        new_pwd.pack(pady=(0, SP["sm"]))
 
         confirm_pwd = ctk.CTkEntry(
-            dialog,
-            width=350,
-            height=40,
+            content,
+            width=300,
+            height=CTL["h"],
             placeholder_text="Confirm New Password",
             show="●",
+            fg_color=COLORS["bg_card"],
+            border_color=COLORS["border"],
+            corner_radius=RAD["md"],
         )
-        confirm_pwd.pack(pady=10)
+        confirm_pwd.pack(pady=(0, SP["sm"]))
 
-        status = ctk.CTkLabel(dialog, text="", font=("Segoe UI", 12))
-        status.pack(pady=5)
+        status = ctk.CTkLabel(content, text="", font=FONT["small"])
+        status.pack(pady=SP["xs"])
 
         def change():
             old = old_pwd.get()
@@ -4326,16 +4916,36 @@ class LockBoxUI(LoginViewMixin):
             except Exception as e:
                 status.configure(text=f"❌ {str(e)}", text_color=COLORS["danger"])
 
+        # Action buttons
+        btn_frame = ctk.CTkFrame(content, fg_color="transparent")
+        btn_frame.pack(fill="x", pady=(SP["md"], 0))
+
         ctk.CTkButton(
-            dialog,
-            text="🔐 Change Password",
-            width=350,
-            height=45,
-            font=("Segoe UI", 14, "bold"),
+            btn_frame,
+            text="Cancel",
+            width=90,
+            height=CTL["h"],
+            font=FONT["button"],
+            fg_color="transparent",
+            hover_color=COLORS["bg_hover"],
+            text_color=COLORS["text_secondary"],
+            border_width=1,
+            border_color=COLORS["border"],
+            corner_radius=RAD["md"],
+            command=dialog.destroy,
+        ).pack(side="left")
+
+        ctk.CTkButton(
+            btn_frame,
+            text="Change Password",
+            width=180,
+            height=CTL["h"],
+            font=FONT["button"],
             fg_color=COLORS["accent"],
             hover_color=COLORS["accent_hover"],
+            corner_radius=RAD["md"],
             command=change,
-        ).pack(pady=20)
+        ).pack(side="right")
 
     def show_shortcuts_help(self):
         """Display keyboard shortcuts"""

@@ -203,6 +203,15 @@ class Vault:
 
         self.last_activity = datetime.now()
 
+        # Update security integrity hashes after save
+        try:
+            from app.core.security_manager import get_security
+
+            security = get_security()
+            security.on_vault_saved()
+        except Exception as e:
+            print(f"Warning: Could not update integrity hashes: {e}")
+
     def _check_unlocked(self):
         """Helper to ensure vault is unlocked"""
         if self.is_locked or self.key is None:

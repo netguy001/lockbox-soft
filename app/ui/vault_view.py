@@ -9,6 +9,7 @@ from pathlib import Path
 from PIL import Image
 from app.core.vault import Vault
 from app.core.crypto import generate_password, check_password_strength
+from app.core.security_manager import get_security
 from app.constants import COLORS, AUTO_LOCK_MINUTES, CLIPBOARD_CLEAR_SECONDS, VAULT_FILE
 from app.services.qr_service import QRShare
 from app.ui.login_view import LoginViewMixin
@@ -67,6 +68,20 @@ class LockBoxUI(LoginViewMixin):
         self.SIDEBAR_WIDTH = 280
         self.SIDEBAR_COLLAPSED_WIDTH = 76
 
+        # Initialize security orchestrator
+        self.security = get_security()
+        security_result = self.security.initialize_security()
+
+        # Store security warnings to show after login
+        self._pending_security_warnings = security_result.get("warnings", [])
+
+        # Window security state
+        self._is_blurred = False
+        self._blur_overlay = None
+        self._blur_timer = None
+        self._vault_unlocked = False
+        self._open_dialogs = []
+
         # Icon setup
         try:
             icon_paths = [
@@ -84,6 +99,8 @@ class LockBoxUI(LoginViewMixin):
         self.app.title("LockBox - Private by default")
         self.app.geometry("1280x820")
         self.app.minsize(1100, 720)
+        # Maximize window after it's displayed
+        self.app.after(100, lambda: self.app.state("zoomed"))
 
         self.current_category = "passwords"
         self.clipboard_timer = None
@@ -93,6 +110,13 @@ class LockBoxUI(LoginViewMixin):
 
         # Load saved settings (theme, accent color)
         self._load_settings()
+        self._load_security_settings()
+
+        # Bind window focus events
+        self.app.bind("<FocusOut>", self._on_window_focus_out)
+        self.app.bind("<FocusIn>", self._on_window_focus_in)
+        self.app.bind("<Unmap>", self._on_window_minimize)
+        self.app.bind("<Map>", self._on_window_restore)
 
         self.show_login()
         self.setup_keyboard_shortcuts()
@@ -139,6 +163,189 @@ class LockBoxUI(LoginViewMixin):
                 ctk.set_appearance_mode(saved_theme)
         except Exception as e:
             print(f"Could not load settings: {e}")
+
+    def _load_security_settings(self):
+        """Load security settings from config file"""
+        import json
+        from app.constants import CONFIG_FILE
+
+        # Default values
+        self._blur_on_focus_loss = True
+        self._blur_on_minimize = True
+        self._blur_to_lock_seconds = None
+        self._screenshot_protection = True
+        self._clear_clipboard_on_blur = True
+
+        try:
+            if CONFIG_FILE.exists():
+                with open(CONFIG_FILE, "r") as f:
+                    settings = json.load(f)
+
+                self._blur_on_focus_loss = settings.get("blur_on_focus_loss", True)
+                self._blur_on_minimize = settings.get("blur_on_minimize", True)
+                self._blur_to_lock_seconds = settings.get("blur_to_lock_seconds", None)
+                self._screenshot_protection = settings.get(
+                    "screenshot_protection", True
+                )
+                self._clear_clipboard_on_blur = settings.get(
+                    "clear_clipboard_on_blur", True
+                )
+        except Exception as e:
+            print(f"Could not load security settings: {e}")
+
+    def _save_security_settings(self):
+        """Save security settings to config file"""
+        import json
+        from app.constants import CONFIG_FILE, DATA_DIR
+
+        try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+            settings = {}
+            if CONFIG_FILE.exists():
+                with open(CONFIG_FILE, "r") as f:
+                    settings = json.load(f)
+
+            settings["blur_on_focus_loss"] = self._blur_on_focus_loss
+            settings["blur_on_minimize"] = self._blur_on_minimize
+            settings["blur_to_lock_seconds"] = self._blur_to_lock_seconds
+            settings["screenshot_protection"] = self._screenshot_protection
+            settings["clear_clipboard_on_blur"] = self._clear_clipboard_on_blur
+
+            with open(CONFIG_FILE, "w") as f:
+                json.dump(settings, f, indent=2)
+        except Exception as e:
+            print(f"Could not save security settings: {e}")
+
+    # ─────────────────────────────────────────────────────────────────────
+    # WINDOW BLUR SECURITY
+    # ─────────────────────────────────────────────────────────────────────
+
+    def _on_window_focus_out(self, event=None):
+        """Handle window losing focus"""
+        if not self._vault_unlocked:
+            return
+        if not self._blur_on_focus_loss:
+            return
+        # Only trigger if the main window loses focus
+        if event and event.widget == self.app:
+            self._trigger_blur("focus_loss")
+
+    def _on_window_focus_in(self, event=None):
+        """Handle window regaining focus"""
+        if event and event.widget == self.app:
+            self._remove_blur()
+
+    def _on_window_minimize(self, event=None):
+        """Handle window minimization"""
+        if not self._vault_unlocked:
+            return
+        if not self._blur_on_minimize:
+            return
+        self._trigger_blur("minimize")
+
+    def _on_window_restore(self, event=None):
+        """Handle window restoration"""
+        self._remove_blur()
+
+    def _trigger_blur(self, reason: str = ""):
+        """Show blur overlay to protect sensitive content"""
+        if self._is_blurred:
+            return
+        if not self._vault_unlocked:
+            return
+
+        self._is_blurred = True
+
+        # Clear clipboard if enabled
+        if self._clear_clipboard_on_blur:
+            try:
+                import pyperclip
+
+                pyperclip.copy("")
+            except:
+                pass
+
+        # Create blur overlay
+        self._create_blur_overlay()
+
+        # Start blur-to-lock timer if configured
+        if self._blur_to_lock_seconds:
+            self._blur_timer = self.app.after(
+                self._blur_to_lock_seconds * 1000, self._blur_timeout_lock
+            )
+
+    def _remove_blur(self):
+        """Remove blur overlay"""
+        if not self._is_blurred:
+            return
+
+        self._is_blurred = False
+
+        # Cancel blur-to-lock timer
+        if self._blur_timer:
+            self.app.after_cancel(self._blur_timer)
+            self._blur_timer = None
+
+        # Remove overlay
+        if self._blur_overlay:
+            try:
+                self._blur_overlay.destroy()
+            except:
+                pass
+            self._blur_overlay = None
+
+    def _create_blur_overlay(self):
+        """Create the blur overlay with lock icon"""
+        if self._blur_overlay:
+            return
+
+        self._blur_overlay = ctk.CTkFrame(
+            self.app,
+            fg_color=COLORS["bg_primary"],
+        )
+        self._blur_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
+
+        # Center content
+        center = ctk.CTkFrame(self._blur_overlay, fg_color="transparent")
+        center.place(relx=0.5, rely=0.5, anchor="center")
+
+        # Blurred/protected icon
+        ctk.CTkLabel(
+            center,
+            text="🫥",
+            font=("Segoe UI", 64),
+            text_color=COLORS["text_muted"],
+        ).pack(pady=(0, SP["md"]))
+
+        ctk.CTkLabel(
+            center,
+            text="Content Protected",
+            font=FONT["h2"],
+            text_color=COLORS["text_secondary"],
+        ).pack()
+
+        ctk.CTkLabel(
+            center,
+            text="Click window to reveal",
+            font=FONT["body"],
+            text_color=COLORS["text_muted"],
+        ).pack(pady=(SP["sm"], 0))
+
+        # Show countdown if blur-to-lock is enabled
+        if self._blur_to_lock_seconds:
+            self._blur_countdown_label = ctk.CTkLabel(
+                center,
+                text=f"Auto-lock in {self._blur_to_lock_seconds}s",
+                font=FONT["small"],
+                text_color=COLORS["text_muted"],
+            )
+            self._blur_countdown_label.pack(pady=(SP["lg"], 0))
+
+    def _blur_timeout_lock(self):
+        """Lock vault after blur timeout"""
+        self._remove_blur()
+        self.auto_lock()
 
     def _save_settings(self, theme=None, accent_color=None):
         """Save settings to config file"""
@@ -223,6 +430,32 @@ class LockBoxUI(LoginViewMixin):
         y = (dialog.winfo_screenheight() - height) // 2
         dialog.geometry(f"+{x}+{y}")
 
+        # Track open dialogs so screenshot protection can be applied/cleared
+        try:
+            self._open_dialogs.append(dialog)
+
+            def _on_destroy(e):
+                try:
+                    self._open_dialogs.remove(dialog)
+                except Exception:
+                    pass
+
+            dialog.bind("<Destroy>", _on_destroy)
+        except Exception:
+            pass
+
+        # If screenshot protection is enabled, apply to this dialog as well
+        try:
+            if getattr(self, "_screenshot_protection", False) and getattr(
+                self, "_vault_unlocked", False
+            ):
+                try:
+                    self._apply_affinity_to_window(dialog)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         return dialog
 
     def create_placeholder_textbox(self, parent, placeholder, width=400, height=100):
@@ -285,16 +518,44 @@ class LockBoxUI(LoginViewMixin):
 
     def auto_lock(self):
         """Auto lock vault after inactivity"""
+        self._vault_unlocked = False
+        self._remove_blur()
+        self.security.end_session()
+
+        # Clear clipboard on lock
+        try:
+            import pyperclip
+
+            pyperclip.copy("")
+        except:
+            pass
+
         self.vault.lock()
+        try:
+            self._disable_screenshot_protection()
+        except Exception:
+            pass
         self.show_login()
         messagebox.showinfo(
             "Auto-Locked",
             f"Vault locked after {AUTO_LOCK_MINUTES} minutes of inactivity",
         )
 
+    def _security_auto_lock(self):
+        """Called by security manager when session times out"""
+        self.auto_lock()
+
+    def _show_security_warnings(self, warnings):
+        """Show security warnings dialog"""
+        if not warnings:
+            return
+        warning_text = "\n".join(warnings)
+        messagebox.showwarning("Security Alert", warning_text)
+
     def reset_activity(self):
         """Reset activity timer"""
         self.start_auto_lock_timer()
+        self.security.update_activity()
 
     def show_login(self):
         """Display login screen with recovery option"""
@@ -312,6 +573,36 @@ class LockBoxUI(LoginViewMixin):
         """Display main vault interface"""
         self.clear()
         self.start_auto_lock_timer()
+
+        # Mark vault as unlocked for blur protection
+        self._vault_unlocked = True
+
+        # Enable screenshot protection if configured
+        if self._screenshot_protection:
+            self._enable_screenshot_protection()
+
+        # Start security session
+        self.security.start_session(lock_callback=self._security_auto_lock)
+
+        # Check file integrity
+        integrity = self.security.check_file_integrity()
+        if integrity.get("tampered"):
+            self.app.after(
+                500,
+                lambda: messagebox.showwarning(
+                    "Security Warning",
+                    integrity.get("message", "Files may have been tampered with"),
+                ),
+            )
+
+        # Show any pending security warnings
+        if (
+            hasattr(self, "_pending_security_warnings")
+            and self._pending_security_warnings
+        ):
+            warnings = self._pending_security_warnings
+            self._pending_security_warnings = []
+            self.app.after(1000, lambda: self._show_security_warnings(warnings))
 
         # Root container
         main = ctk.CTkFrame(self.app, fg_color=COLORS["bg_primary"])
@@ -554,7 +845,7 @@ class LockBoxUI(LoginViewMixin):
         bottom_actions = [
             ("Backup", self.show_backup_dialog, "💾"),
             ("Restore", self.show_restore_dialog, "📥"),
-            ("Settings", self.show_settings_page, "⚙"),
+            ("Settings", self.show_settings_page, "🔧"),
         ]
         for label, cmd, icon in bottom_actions:
             # Create button container frame for compound icon+text
@@ -800,7 +1091,10 @@ class LockBoxUI(LoginViewMixin):
                 corner_radius=RAD["md"],
                 border_width=1,
                 border_color=COLORS["accent"],
+                height=CTL["h"],
+                width=250,
             )
+            self.search_frame.pack_propagate(False)
 
             # Search icon inside expanded frame
             self.search_icon_label = ctk.CTkLabel(
@@ -1391,9 +1685,9 @@ class LockBoxUI(LoginViewMixin):
             return
         self.search_expanded = True
         self.search_icon_btn.pack_forget()
-        self.search_frame.pack(side="left")
+        self.search_frame.pack(side="left", fill="y")
         self.search_icon_label.pack(side="left", padx=(SP["sm"], 0))
-        self.search_entry.pack(side="left", padx=(4, 0), pady=2)
+        self.search_entry.pack(side="left", padx=(4, 0))
         self.search_close_btn.pack(side="left", padx=(0, SP["xs"]))
         self.search_entry.focus_set()
 
@@ -3166,6 +3460,118 @@ class LockBoxUI(LoginViewMixin):
             text_color=COLORS["text_muted"],
         ).pack(anchor="w", padx=SP["lg"], pady=(0, SP["md"]))
 
+        # System Security Status Section
+        sys_security_section = ctk.CTkFrame(
+            content_container,
+            fg_color=COLORS["bg_card"],
+            corner_radius=RAD["md"],
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        sys_security_section.pack(fill="x", pady=(0, SP["lg"]))
+
+        sys_header = ctk.CTkFrame(sys_security_section, fg_color="transparent")
+        sys_header.pack(fill="x", padx=SP["lg"], pady=SP["md"])
+
+        ctk.CTkLabel(
+            sys_header,
+            text="🛡️ System Security",
+            font=FONT["h3"],
+            text_color=COLORS["accent"],
+        ).pack(side="left")
+
+        # Get security report
+        security_report = self.security.get_comprehensive_report()
+
+        # Protection status items
+        protections = [
+            (
+                "File Protection",
+                security_report["protection_status"]["file_protection"],
+                "Restricts file access to your user only",
+            ),
+            (
+                "Integrity Checks",
+                security_report["protection_status"]["integrity_checks"],
+                "Detects unauthorized file modifications",
+            ),
+            (
+                "Auto-Lock",
+                security_report["protection_status"]["auto_lock"],
+                f"Locks after {AUTO_LOCK_MINUTES} min inactivity",
+            ),
+            (
+                "Memory Protection",
+                security_report["protection_status"]["memory_protection"],
+                "Protects against memory attacks",
+            ),
+        ]
+
+        for name, enabled, description in protections:
+            row = ctk.CTkFrame(
+                sys_security_section,
+                fg_color=COLORS["bg_hover"],
+                corner_radius=RAD["sm"],
+            )
+            row.pack(fill="x", padx=SP["lg"], pady=(0, SP["xs"]))
+
+            row_content = ctk.CTkFrame(row, fg_color="transparent")
+            row_content.pack(fill="x", padx=SP["md"], pady=SP["sm"])
+
+            status_icon = "✓" if enabled else "○"
+            status_color = COLORS["success"] if enabled else COLORS["text_muted"]
+
+            ctk.CTkLabel(
+                row_content,
+                text=status_icon,
+                font=FONT["body"],
+                text_color=status_color,
+                width=20,
+            ).pack(side="left")
+
+            ctk.CTkLabel(
+                row_content,
+                text=name,
+                font=FONT["body"],
+                text_color=COLORS["text_primary"],
+            ).pack(side="left", padx=(SP["xs"], 0))
+
+            ctk.CTkLabel(
+                row_content,
+                text=description,
+                font=FONT["small"],
+                text_color=COLORS["text_muted"],
+            ).pack(side="right")
+
+        # Show any security warnings
+        env_warnings = security_report.get("warnings", [])
+        if security_report["environment"].get("debugger"):
+            env_warnings.append("⚠️ Debugger detected")
+        if security_report["environment"].get("screen_capture"):
+            env_warnings.append("⚠️ Screen recording software detected")
+        if security_report["environment"].get("suspicious_processes"):
+            count = len(security_report["environment"]["suspicious_processes"])
+            env_warnings.append(f"⚠️ {count} suspicious process(es) detected")
+
+        if env_warnings:
+            warn_frame = ctk.CTkFrame(sys_security_section, fg_color="transparent")
+            warn_frame.pack(fill="x", padx=SP["lg"], pady=(SP["sm"], SP["md"]))
+
+            for warning in env_warnings[:3]:
+                ctk.CTkLabel(
+                    warn_frame,
+                    text=warning,
+                    font=FONT["small"],
+                    text_color=COLORS["warning"],
+                ).pack(anchor="w")
+        else:
+            ctk.CTkLabel(
+                sys_security_section,
+                text="✓ No security threats detected",
+                font=FONT["small"],
+                text_color=COLORS["success"],
+            ).pack(anchor="w", padx=SP["lg"], pady=(SP["sm"], SP["md"]))
+
     def _run_breach_scan(self):
         """Run breach scan with subtle loading state"""
         from app.services.breach_service import scan_all_passwords
@@ -3994,11 +4400,15 @@ class LockBoxUI(LoginViewMixin):
         def toggle_password_visibility():
             if show_password[0]:
                 password_entry.configure(show="●")
-                toggle_btn.configure(text="🔒")  # Lock when hidden
+                toggle_btn.configure(
+                    text="🔒", text_color=COLORS["text_primary"]
+                )  # Lock when hidden
                 show_password[0] = False
             else:
                 password_entry.configure(show="")
-                toggle_btn.configure(text="🔓")  # Unlock when shown
+                toggle_btn.configure(
+                    text="🔓", text_color=COLORS["accent"]
+                )  # Unlock when shown
                 show_password[0] = True
 
         toggle_btn = ctk.CTkButton(
@@ -4007,8 +4417,11 @@ class LockBoxUI(LoginViewMixin):
             width=40,
             height=40,
             font=("Segoe UI", 16),
-            fg_color=COLORS["bg_hover"],
-            hover_color=COLORS["border"],
+            fg_color=COLORS["bg_card"],
+            hover_color=COLORS["bg_hover"],
+            text_color=COLORS["text_primary"],
+            border_width=1,
+            border_color=COLORS["border"],
             corner_radius=6,
             command=toggle_password_visibility,
         )
@@ -4055,11 +4468,15 @@ class LockBoxUI(LoginViewMixin):
             def toggle_preview():
                 if show_preview[0]:
                     preview_entry.configure(show="●")
-                    preview_toggle.configure(text="🔒")  # Lock when hidden
+                    preview_toggle.configure(
+                        text="🔒", text_color=COLORS["text_primary"]
+                    )  # Lock when hidden
                     show_preview[0] = False
                 else:
                     preview_entry.configure(show="")
-                    preview_toggle.configure(text="🔓")  # Unlock when shown
+                    preview_toggle.configure(
+                        text="🔓", text_color=COLORS["accent"]
+                    )  # Unlock when shown
                     show_preview[0] = True
 
             preview_toggle = ctk.CTkButton(
@@ -4068,8 +4485,9 @@ class LockBoxUI(LoginViewMixin):
                 width=40,
                 height=40,
                 font=("Segoe UI", 16),
-                fg_color=COLORS["bg_hover"],
-                hover_color=COLORS["border"],
+                fg_color=COLORS["bg_card"],
+                hover_color=COLORS["bg_hover"],
+                text_color=COLORS["text_primary"],
                 corner_radius=6,
                 command=toggle_preview,
             )
@@ -4573,8 +4991,11 @@ class LockBoxUI(LoginViewMixin):
             width=40,
             height=40,
             font=("Segoe UI", 16),
-            fg_color=COLORS["bg_hover"],
-            hover_color=COLORS["border"],
+            fg_color=COLORS["bg_card"],
+            hover_color=COLORS["bg_hover"],
+            text_color=COLORS["text_secondary"],
+            border_width=1,
+            border_color=COLORS["border"],
             corner_radius=6,
             command=toggle_password_visibility,
         )
@@ -5212,7 +5633,7 @@ class LockBoxUI(LoginViewMixin):
         # Header
         ctk.CTkLabel(
             main_scroll,
-            text="⚙️ Settings",
+            text="🔧 Settings",
             font=FONT["h1"],
             text_color=COLORS["text_primary"],
         ).pack(anchor="w", pady=(0, SP["lg"]))
@@ -5253,7 +5674,22 @@ class LockBoxUI(LoginViewMixin):
             text_color=COLORS["text_secondary"],
         ).pack(side="left")
 
-        theme_var = ctk.StringVar(value="Dark")
+        # Get current theme from settings
+        current_theme = "Dark"
+        try:
+            from app.constants import CONFIG_FILE
+
+            if CONFIG_FILE.exists():
+                import json
+
+                with open(CONFIG_FILE, "r") as f:
+                    settings = json.load(f)
+                    saved = settings.get("theme", "dark").lower()
+                    current_theme = saved.capitalize()  # "dark" -> "Dark"
+        except:
+            pass
+
+        theme_var = ctk.StringVar(value=current_theme)
         theme_menu = ctk.CTkOptionMenu(
             theme_row,
             values=["System", "Dark", "Light"],
@@ -5463,6 +5899,44 @@ class LockBoxUI(LoginViewMixin):
             corner_radius=RAD["sm"],
         )
         clipboard_menu.pack(side="right")
+
+        # Screenshot protection toggle
+        screenshot_row = ctk.CTkFrame(security_content, fg_color="transparent")
+        screenshot_row.pack(fill="x", pady=SP["xs"])
+        try:
+            screenshot_var = ctk.BooleanVar(value=self._screenshot_protection)
+        except Exception:
+            screenshot_var = ctk.BooleanVar(value=True)
+
+        def _on_screenshot_toggle():
+            self._screenshot_protection = screenshot_var.get()
+            try:
+                self._save_security_settings()
+            except Exception:
+                pass
+            try:
+                if self._screenshot_protection:
+                    # apply protection immediately if vault is visible
+                    if getattr(self, "_vault_unlocked", False):
+                        self._enable_screenshot_protection()
+                else:
+                    # remove any OS-level display affinity
+                    try:
+                        self._disable_screenshot_protection()
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"Error toggling screenshot protection: {e}")
+
+        screenshot_toggle = ctk.CTkCheckBox(
+            screenshot_row,
+            text="Enable screenshot protection (block screenshots)",
+            font=FONT["body"],
+            text_color=COLORS["text_secondary"],
+            variable=screenshot_var,
+            command=_on_screenshot_toggle,
+        )
+        screenshot_toggle.pack(side="left")
 
         # Change Master Password button
         pwd_row = ctk.CTkFrame(security_content, fg_color="transparent")
@@ -5968,9 +6442,8 @@ class LockBoxUI(LoginViewMixin):
         if self.clipboard_timer:
             self.app.after_cancel(self.clipboard_timer)
 
-        self.clipboard_timer = self.app.after(
-            CLIPBOARD_CLEAR_SECONDS * 1000, lambda: pyperclip.copy("")
-        )
+        # Use security manager for clipboard clearing
+        self.clipboard_timer = self.security.schedule_clipboard_clear(self.app)
 
     def delete_item(self, item_id, item_type):
         """Delete item with confirmation"""
@@ -6020,12 +6493,175 @@ class LockBoxUI(LoginViewMixin):
     def lock_vault(self):
         """Lock vault and return to login"""
         self.reset_activity()
+
+        # Mark vault as locked
+        self._vault_unlocked = False
+        self._remove_blur()
+
+        # Clear clipboard on lock
+        try:
+            import pyperclip
+
+            pyperclip.copy("")
+        except:
+            pass
+
         # Cancel TOTP auto-refresh when leaving
         if hasattr(self, "_totp_timer"):
             self.app.after_cancel(self._totp_timer)
             delattr(self, "_totp_timer")
+
+        # End security session properly
+        self.security.end_session()
+
+        try:
+            self._disable_screenshot_protection()
+        except Exception:
+            pass
+
         self.vault.lock()
         self.show_login()
+
+    def _enable_screenshot_protection(self):
+        """Enable OS-level screenshot protection"""
+        try:
+            # Apply to main window
+            self._apply_affinity_to_window(self.app)
+
+            # Apply to any open dialogs
+            try:
+                for dlg in list(getattr(self, "_open_dialogs", [])):
+                    try:
+                        self._apply_affinity_to_window(dlg)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"Screenshot protection not available: {e}")
+
+    def _disable_screenshot_protection(self):
+        """Disable OS-level screenshot protection (clear affinity)"""
+        try:
+            # Clear affinity for all known windows in this process (best-effort)
+            try:
+                self._clear_affinity_for_all_windows()
+            except Exception:
+                pass
+
+            # Also clear for any tracked dialogs specifically
+            try:
+                for dlg in list(getattr(self, "_open_dialogs", [])):
+                    try:
+                        self._clear_affinity_for_window(dlg)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        except Exception:
+            # Ignore any unexpected errors; disabling is best-effort
+            pass
+
+    def _apply_affinity_to_window(self, window):
+        """Apply display affinity to a specific Toplevel/Window object."""
+        try:
+            import ctypes
+
+            # Use the window's winfo_id; GetParent is used for CTk windows
+            try:
+                hwnd = ctypes.windll.user32.GetParent(window.winfo_id())
+            except Exception:
+                hwnd = window.winfo_id()
+
+            # Try exclude-from-capture first
+            WDA_EXCLUDEFROMCAPTURE = 0x00000011
+            result = ctypes.windll.user32.SetWindowDisplayAffinity(
+                hwnd, WDA_EXCLUDEFROMCAPTURE
+            )
+            if result == 0:
+                WDA_MONITOR = 0x00000001
+                ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, WDA_MONITOR)
+        except Exception:
+            pass
+
+    def _clear_affinity_for_window(self, window):
+        """Clear display affinity for a specific window (best-effort)."""
+        try:
+            import ctypes
+
+            try:
+                hwnd = ctypes.windll.user32.GetParent(window.winfo_id())
+            except Exception:
+                hwnd = window.winfo_id()
+            ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0)
+        except Exception:
+            pass
+
+    def _apply_affinity_to_all_windows(self):
+        """Enumerate top-level windows for this process and apply display affinity."""
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            EnumWindows = ctypes.windll.user32.EnumWindows
+            GetWindowThreadProcessId = ctypes.windll.user32.GetWindowThreadProcessId
+            pid = ctypes.windll.kernel32.GetCurrentProcessId()
+
+            windows = []
+
+            @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+            def _enum_proc(hwnd, lParam):
+                lpdwProcessId = wintypes.DWORD()
+                GetWindowThreadProcessId(hwnd, ctypes.byref(lpdwProcessId))
+                if lpdwProcessId.value == pid:
+                    windows.append(hwnd)
+                return True
+
+            EnumWindows(_enum_proc, 0)
+
+            WDA_EXCLUDEFROMCAPTURE = 0x00000011
+            WDA_MONITOR = 0x00000001
+            for hwnd in windows:
+                try:
+                    res = ctypes.windll.user32.SetWindowDisplayAffinity(
+                        hwnd, WDA_EXCLUDEFROMCAPTURE
+                    )
+                    if res == 0:
+                        ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, WDA_MONITOR)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _clear_affinity_for_all_windows(self):
+        """Clear display affinity for all top-level windows of this process."""
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            EnumWindows = ctypes.windll.user32.EnumWindows
+            GetWindowThreadProcessId = ctypes.windll.user32.GetWindowThreadProcessId
+            pid = ctypes.windll.kernel32.GetCurrentProcessId()
+
+            windows = []
+
+            @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+            def _enum_proc(hwnd, lParam):
+                lpdwProcessId = wintypes.DWORD()
+                GetWindowThreadProcessId(hwnd, ctypes.byref(lpdwProcessId))
+                if lpdwProcessId.value == pid:
+                    windows.append(hwnd)
+                return True
+
+            EnumWindows(_enum_proc, 0)
+
+            for hwnd in windows:
+                try:
+                    ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def check_password_breach(self, item):
         """Check if password has been breached"""

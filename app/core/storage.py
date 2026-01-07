@@ -2,7 +2,12 @@ import os
 import tempfile
 import shutil
 from pathlib import Path
-from app.constants import DATA_DIR, VAULT_FILE
+from app.constants import (
+    DATA_DIR,
+    VAULT_FILE,
+    ENABLE_FILE_PROTECTION,
+    ENABLE_INTEGRITY_CHECKS,
+)
 
 
 def save_vault(data: bytes):
@@ -29,6 +34,27 @@ def save_vault(data: bytes):
         else:
             os.replace(temp_path, VAULT_FILE)
 
+        # Apply file protection after saving
+        if ENABLE_FILE_PROTECTION:
+            try:
+                from app.core.file_protection import FileProtection
+
+                fp = FileProtection(DATA_DIR)
+                fp.protect_directory()
+                fp.hide_sensitive_files()
+            except Exception as e:
+                print(f"Warning: File protection failed: {e}")
+
+        # Save integrity data
+        if ENABLE_INTEGRITY_CHECKS:
+            try:
+                from app.core.file_protection import FileProtection
+
+                fp = FileProtection(DATA_DIR)
+                fp.save_integrity_data(VAULT_FILE)
+            except Exception as e:
+                print(f"Warning: Integrity save failed: {e}")
+
     except Exception as e:
         try:
             os.unlink(temp_path)
@@ -44,6 +70,18 @@ def load_vault() -> bytes:
     """
     if not VAULT_FILE.exists():
         return None
+
+    # Check integrity before loading
+    if ENABLE_INTEGRITY_CHECKS:
+        try:
+            from app.core.file_protection import FileProtection
+
+            fp = FileProtection(DATA_DIR)
+            result = fp.check_integrity(VAULT_FILE)
+            if result.get("tampered"):
+                print(f"WARNING: {result['message']}")
+        except Exception as e:
+            print(f"Warning: Integrity check failed: {e}")
 
     try:
         return VAULT_FILE.read_bytes()

@@ -7,6 +7,8 @@ from app.constants import (
     VAULT_FILE,
     ENABLE_FILE_PROTECTION,
     ENABLE_INTEGRITY_CHECKS,
+    BACKUP_DIR,
+    CONFIG_FILE,
 )
 
 
@@ -102,18 +104,59 @@ def create_backup(backup_name: str = None) -> Path:
         raise FileNotFoundError("No vault file to backup")
 
     from datetime import datetime
+    import json
+
+    # Determine backup directory and retention from config if present
+    backup_dir = BACKUP_DIR
+    retention = 10
+    try:
+        if CONFIG_FILE.exists():
+            with open(CONFIG_FILE, "r", encoding="utf-8") as cf:
+                cfg = json.load(cf)
+                bdir = cfg.get("backup_dir")
+                if bdir:
+                    backup_dir = Path(bdir)
+                retention = int(cfg.get("backup_retention", retention))
+    except Exception:
+        # on any failure, fall back to defaults
+        backup_dir = BACKUP_DIR
+
+    backup_dir.mkdir(exist_ok=True, parents=True)
 
     if backup_name is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_name = f"lockbox_backup_{timestamp}.vault"
 
-    backup_dir = DATA_DIR / "backups"
-    backup_dir.mkdir(exist_ok=True, parents=True)
-
+    # Write backup atomically: write to tmp then replace
     backup_path = backup_dir / backup_name
-    shutil.copy2(VAULT_FILE, backup_path)
+    tmp_path = backup_dir / (backup_name + ".tmp")
+    try:
+        data = VAULT_FILE.read_bytes()
+        with open(tmp_path, "wb") as tf:
+            tf.write(data)
+            try:
+                tf.flush()
+                os.fsync(tf.fileno())
+            except Exception:
+                pass
+        os.replace(str(tmp_path), str(backup_path))
 
-    return backup_path
+        # Prune older backups, keep last `retention` files
+        backups = sorted(backup_dir.glob("lockbox_backup_*.vault"))
+        if len(backups) > retention:
+            for old in backups[:-retention]:
+                try:
+                    old.unlink()
+                except Exception:
+                    pass
+
+        return backup_path
+    finally:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except Exception:
+            pass
 
 
 def restore_from_backup(backup_path: Path):

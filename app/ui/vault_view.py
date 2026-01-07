@@ -180,6 +180,9 @@ class LockBoxUI(LoginViewMixin):
         self._blur_to_lock_seconds = None
         self._screenshot_protection = True
         self._clear_clipboard_on_blur = True
+        # Backup settings
+        self._backup_dir = None
+        self._backup_retention = 10
 
         try:
             if CONFIG_FILE.exists():
@@ -195,6 +198,9 @@ class LockBoxUI(LoginViewMixin):
                 self._clear_clipboard_on_blur = settings.get(
                     "clear_clipboard_on_blur", True
                 )
+                # Backup configuration
+                self._backup_dir = settings.get("backup_dir", None)
+                self._backup_retention = settings.get("backup_retention", 10)
         except Exception as e:
             print(f"Could not load security settings: {e}")
 
@@ -216,6 +222,10 @@ class LockBoxUI(LoginViewMixin):
             settings["blur_to_lock_seconds"] = self._blur_to_lock_seconds
             settings["screenshot_protection"] = self._screenshot_protection
             settings["clear_clipboard_on_blur"] = self._clear_clipboard_on_blur
+            # Backup configuration
+            if getattr(self, "_backup_dir", None):
+                settings["backup_dir"] = str(self._backup_dir)
+            settings["backup_retention"] = int(getattr(self, "_backup_retention", 10))
 
             with open(CONFIG_FILE, "w") as f:
                 json.dump(settings, f, indent=2)
@@ -5492,6 +5502,23 @@ class LockBoxUI(LoginViewMixin):
             try:
                 self.vault.backup_vault(save_path)
                 messagebox.showinfo("Success", f"Backup saved to:\n{save_path}")
+                # Offer to use this folder as default backup directory
+                try:
+                    set_default = messagebox.askyesno(
+                        "Set Default?",
+                        "Use this folder as the default backup directory?",
+                    )
+                    if set_default:
+                        import os
+
+                        self._backup_dir = os.path.dirname(save_path)
+                        self._save_security_settings()
+                        messagebox.showinfo(
+                            "Saved",
+                            f"Default backup directory set to:\n{self._backup_dir}",
+                        )
+                except Exception:
+                    pass
             except Exception as e:
                 messagebox.showerror("Error", f"Backup failed: {str(e)}")
 

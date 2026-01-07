@@ -176,23 +176,19 @@ class Vault:
         """Encrypt and save vault to disk with auto-backup"""
         if self.is_locked:
             raise ValueError("Vault is locked")
-
+        # Create a versioned, atomic backup in the configured backup directory
         if self.path.exists() and self.path.stat().st_size > 0:
             try:
-                backup_dir = self.path.parent / "backups" / "auto"
-                backup_dir.mkdir(parents=True, exist_ok=True)
+                from app.core.storage import create_backup
 
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                backup_path = backup_dir / f"auto_backup_{timestamp}.vault"
-
-                shutil.copy2(self.path, backup_path)
-
-                backups = sorted(backup_dir.glob("auto_backup_*.vault"))
-                if len(backups) > 5:
-                    for old_backup in backups[:-5]:
-                        old_backup.unlink()
-            except Exception as e:
-                print(f"Warning: Auto-backup failed: {e}")
+                # create_backup reads CONFIG_FILE for backup_dir and retention
+                try:
+                    create_backup()
+                except Exception as e:
+                    print(f"Warning: Auto-backup failed: {e}")
+            except Exception:
+                # avoid blocking save if backup subsystem fails
+                pass
 
         raw = json.dumps(self.data, indent=2).encode()
         encrypted = encrypt(raw, self.key)

@@ -31,6 +31,103 @@ class LoginViewMixin(RecoveryDialogMixin):
         self.clear()
         self.setup_state = None
 
+        # Emergency mode: if data dir or vault file is missing, offer recovery/create options
+        from app.constants import DATA_DIR
+
+        data_dir_missing = not DATA_DIR.exists()
+        vault_missing = not VAULT_FILE.exists() or VAULT_FILE.stat().st_size == 0
+
+        if data_dir_missing or vault_missing:
+            # Show Emergency Mode UI
+            screen = ctk.CTkFrame(self.app, fg_color=COLORS["bg_primary"])
+            screen.pack(fill="both", expand=True)
+
+            ctk.CTkLabel(
+                screen,
+                text="Emergency Mode",
+                font=("Segoe UI", 24, "bold"),
+                text_color=COLORS["warning"],
+            ).pack(pady=(40, 10))
+
+            ctk.CTkLabel(
+                screen,
+                text="Your vault or data directory is missing or inaccessible. Choose an action:",
+                font=("Segoe UI", 12),
+                text_color=COLORS["text_secondary"],
+                wraplength=600,
+            ).pack(pady=(0, 16))
+
+            btn_row = ctk.CTkFrame(screen, fg_color="transparent")
+            btn_row.pack(pady=8)
+
+            def _restore_from_backup():
+                # Ask for backup file and password, then attempt restore using Vault.restore_vault
+                backup_path = filedialog.askopenfilename(
+                    title="Select Backup File",
+                    filetypes=[("Vault files", "*.vault"), ("All files", "*.*")],
+                )
+                if not backup_path:
+                    return
+                # prompt for password
+                pwd = tk.simpledialog.askstring(
+                    "Backup Password",
+                    "Enter backup password:",
+                    show="●",
+                )
+                if pwd is None:
+                    return
+                try:
+                    self.vault.restore_vault(backup_path, pwd)
+                    messagebox.showinfo(
+                        "Success", "Vault restored successfully. Restarting UI."
+                    )
+                    self.show_login()
+                except Exception as e:
+                    messagebox.showerror("Restore Failed", str(e))
+
+            def _create_new():
+                # Start new account flow
+                pwd = tk.simpledialog.askstring(
+                    "Create Password", "Enter a new PIN/Password (5+ chars):", show="●"
+                )
+                if not pwd:
+                    return
+                self._start_new_account_flow(pwd)
+
+            def _exit_app():
+                try:
+                    self.app.quit()
+                except Exception:
+                    try:
+                        sys.exit(0)
+                    except Exception:
+                        pass
+
+            ctk.CTkButton(
+                btn_row,
+                text="Restore from Backup",
+                width=220,
+                height=44,
+                command=_restore_from_backup,
+            ).pack(side="left", padx=8)
+            ctk.CTkButton(
+                btn_row,
+                text="Create New Vault",
+                width=180,
+                height=44,
+                command=_create_new,
+            ).pack(side="left", padx=8)
+            ctk.CTkButton(
+                btn_row,
+                text="Exit",
+                width=120,
+                height=44,
+                fg_color="gray30",
+                command=_exit_app,
+            ).pack(side="left", padx=8)
+
+            return
+
         has_vault = VAULT_FILE.exists() and VAULT_FILE.stat().st_size > 0
         lock_seconds = self._get_setup_lock_seconds()
 

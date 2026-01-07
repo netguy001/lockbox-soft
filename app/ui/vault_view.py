@@ -90,6 +90,9 @@ class LockBoxUI(LoginViewMixin):
         self.sort_by = "created_desc"
         self.search_var = None
 
+        # Load saved settings (theme, accent color)
+        self._load_settings()
+
         self.show_login()
         self.setup_keyboard_shortcuts()
 
@@ -103,6 +106,65 @@ class LockBoxUI(LoginViewMixin):
             "Files",
             "Folders",
         ]
+
+    def _load_settings(self):
+        """Load saved settings from config file"""
+        import json
+        from app.constants import CONFIG_FILE, COLORS, DARK_THEME, LIGHT_THEME
+
+        try:
+            if CONFIG_FILE.exists():
+                with open(CONFIG_FILE, "r") as f:
+                    settings = json.load(f)
+
+                # Apply saved theme
+                saved_theme = settings.get("theme", "dark")
+                if saved_theme == "light":
+                    theme_colors = LIGHT_THEME
+                else:
+                    theme_colors = DARK_THEME
+
+                for key, value in theme_colors.items():
+                    COLORS[key] = value
+
+                # Apply saved accent color
+                saved_accent = settings.get("accent_color")
+                if saved_accent:
+                    COLORS["accent"] = saved_accent
+                    COLORS["accent_hover"] = self._darken_color(saved_accent)
+                    COLORS["accent_soft"] = self._soften_color(saved_accent)
+
+                # Set customtkinter appearance mode
+                ctk.set_appearance_mode(saved_theme)
+        except Exception as e:
+            print(f"Could not load settings: {e}")
+
+    def _save_settings(self, theme=None, accent_color=None):
+        """Save settings to config file"""
+        import json
+        from app.constants import CONFIG_FILE, DATA_DIR
+
+        try:
+            # Ensure data directory exists
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+            # Load existing settings or create new
+            settings = {}
+            if CONFIG_FILE.exists():
+                with open(CONFIG_FILE, "r") as f:
+                    settings = json.load(f)
+
+            # Update with new values
+            if theme is not None:
+                settings["theme"] = theme.lower()
+            if accent_color is not None:
+                settings["accent_color"] = accent_color
+
+            # Save
+            with open(CONFIG_FILE, "w") as f:
+                json.dump(settings, f, indent=2)
+        except Exception as e:
+            print(f"Could not save settings: {e}")
 
     def setup_keyboard_shortcuts(self):
         """Setup global keyboard shortcuts"""
@@ -271,17 +333,16 @@ class LockBoxUI(LoginViewMixin):
         self.category_buttons = {}
         for label, cat, icon in categories:
             is_active = cat == self.current_category
+            # Use accent color directly for active items for better visibility
             btn = ctk.CTkButton(
                 nav_frame,
                 text=f"  {icon}    {label}",
                 width=SIDEBAR_WIDTH - SP["md"] * 2,
                 height=CTL["nav"],
                 font=FONT["nav"],
-                fg_color=COLORS["accent_soft"] if is_active else "transparent",
+                fg_color=COLORS["accent"] if is_active else "transparent",
                 hover_color=COLORS["bg_hover"],
-                text_color=(
-                    COLORS["text_primary"] if is_active else COLORS["text_secondary"]
-                ),
+                text_color="#ffffff" if is_active else COLORS["text_secondary"],
                 anchor="w",
                 corner_radius=RAD["md"],
                 command=lambda c=cat: self.switch_category(c),
@@ -312,17 +373,16 @@ class LockBoxUI(LoginViewMixin):
         ]
         for label, cat, icon in tool_items:
             is_active = cat == self.current_category
+            # Use accent color directly for active items for better visibility
             btn = ctk.CTkButton(
                 sidebar,
                 text=f"  {icon}    {label}",
                 width=SIDEBAR_WIDTH - SP["md"] * 2,
                 height=CTL["nav"],
                 font=FONT["nav"],
-                fg_color=COLORS["accent_soft"] if is_active else "transparent",
+                fg_color=COLORS["accent"] if is_active else "transparent",
                 hover_color=COLORS["bg_hover"],
-                text_color=(
-                    COLORS["text_primary"] if is_active else COLORS["text_secondary"]
-                ),
+                text_color="#ffffff" if is_active else COLORS["text_secondary"],
                 anchor="w",
                 corner_radius=RAD["md"],
                 command=lambda c=cat: self.switch_category(c),
@@ -439,9 +499,9 @@ class LockBoxUI(LoginViewMixin):
         for c, btn in self.category_buttons.items():
             is_active = c == self.current_category
             btn.configure(
-                fg_color=COLORS["accent_soft"] if is_active else "transparent",
+                fg_color=COLORS["accent"] if is_active else "transparent",
                 text_color=(
-                    COLORS["text_primary"] if is_active else COLORS["text_secondary"]
+                    "#ffffff" if is_active else COLORS["text_secondary"]
                 ),
             )
 
@@ -2952,7 +3012,7 @@ class LockBoxUI(LoginViewMixin):
         """Dialog to edit SSH key"""
         dialog = self.create_dialog("Edit SSH Key", 600, 550)
 
-        ctk.CTkLabel(dialog, text="Edit SSH Key", font=("Segoe UI", 20, "bold")).pack(
+        ctk.CTkLabel(dialog, text="Edit SSH Key", font=("Segoe UI", 20, "bold"), text_color=COLORS["text_primary"]).pack(
             pady=20
         )
 
@@ -3010,7 +3070,7 @@ class LockBoxUI(LoginViewMixin):
         """Dialog to edit SSH key"""
         dialog = self.create_dialog("Edit SSH Key", 600, 550)
 
-        ctk.CTkLabel(dialog, text="Edit SSH Key", font=("Segoe UI", 20, "bold")).pack(
+        ctk.CTkLabel(dialog, text="Edit SSH Key", font=("Segoe UI", 20, "bold"), text_color=COLORS["text_primary"]).pack(
             pady=20
         )
 
@@ -3121,7 +3181,7 @@ class LockBoxUI(LoginViewMixin):
         """Dialog to edit API key"""
         dialog = self.create_dialog("Edit API Key", 500, 450)
 
-        ctk.CTkLabel(dialog, text="Edit API Key", font=("Segoe UI", 20, "bold")).pack(
+        ctk.CTkLabel(dialog, text="Edit API Key", font=("Segoe UI", 20, "bold"), text_color=COLORS["text_primary"]).pack(
             pady=20
         )
 
@@ -3181,9 +3241,7 @@ class LockBoxUI(LoginViewMixin):
         """Dialog to add new password"""
         dialog = self.create_dialog("Add Password", 500, 680)
 
-        ctk.CTkLabel(
-            dialog, text="Add New Password", font=("Segoe UI", 20, "bold")
-        ).pack(pady=20)
+        ctk.CTkLabel(dialog, text="Add New Password", font=("Segoe UI", 20, "bold"), text_color=COLORS["text_primary"]).pack(pady=20)
 
         title_entry = ctk.CTkEntry(
             dialog, width=400, height=40, placeholder_text="Title (e.g., Gmail)"
@@ -3225,8 +3283,8 @@ class LockBoxUI(LoginViewMixin):
             width=40,
             height=40,
             font=("Segoe UI", 16),
-            fg_color="gray30",  # FIXED: Now matches other buttons
-            hover_color="gray40",
+            fg_color=COLORS["bg_hover"],  # FIXED: Now matches other buttons
+            hover_color=COLORS["border"],
             corner_radius=6,
             command=toggle_password_visibility,
         )
@@ -3286,8 +3344,8 @@ class LockBoxUI(LoginViewMixin):
                 width=40,
                 height=40,
                 font=("Segoe UI", 16),
-                fg_color="gray30",  # FIXED: Now matches other buttons
-                hover_color="gray40",
+                fg_color=COLORS["bg_hover"],  # FIXED: Now matches other buttons
+                hover_color=COLORS["border"],
                 corner_radius=6,
                 command=toggle_preview,
             )
@@ -3430,8 +3488,8 @@ class LockBoxUI(LoginViewMixin):
                 width=170,
                 height=45,
                 font=("Segoe UI", 13, "bold"),
-                fg_color="gray30",
-                hover_color="gray40",
+                fg_color=COLORS["bg_hover"],
+                hover_color=COLORS["border"],
                 corner_radius=8,
                 command=generate_preview,
             ).pack(side="left", padx=5)
@@ -3618,7 +3676,7 @@ class LockBoxUI(LoginViewMixin):
         """Dialog to add SSH key"""
         dialog = self.create_dialog("Add SSH Key", 600, 550)
 
-        ctk.CTkLabel(dialog, text="Add SSH Key", font=("Segoe UI", 20, "bold")).pack(
+        ctk.CTkLabel(dialog, text="Add SSH Key", font=("Segoe UI", 20, "bold"), text_color=COLORS["text_primary"]).pack(
             pady=20
         )
 
@@ -3695,7 +3753,7 @@ class LockBoxUI(LoginViewMixin):
 
         dialog = self.create_dialog("Add Folder", 500, 400)
 
-        ctk.CTkLabel(dialog, text="Add Folder", font=("Segoe UI", 20, "bold")).pack(
+        ctk.CTkLabel(dialog, text="Add Folder", font=("Segoe UI", 20, "bold"), text_color=COLORS["text_primary"]).pack(
             pady=20
         )
 
@@ -3740,7 +3798,7 @@ class LockBoxUI(LoginViewMixin):
         """Dialog to edit password"""
         dialog = self.create_dialog("Edit Password", 500, 680)
 
-        ctk.CTkLabel(dialog, text="Edit Password", font=("Segoe UI", 20, "bold")).pack(
+        ctk.CTkLabel(dialog, text="Edit Password", font=("Segoe UI", 20, "bold"), text_color=COLORS["text_primary"]).pack(
             pady=20
         )
 
@@ -3781,8 +3839,8 @@ class LockBoxUI(LoginViewMixin):
             width=40,
             height=40,
             font=("Segoe UI", 16),
-            fg_color="gray30",  # FIXED: Now matches other buttons
-            hover_color="gray40",
+            fg_color=COLORS["bg_hover"],  # FIXED: Now matches other buttons
+            hover_color=COLORS["border"],
             corner_radius=6,
             command=toggle_password_visibility,
         )
@@ -3842,8 +3900,8 @@ class LockBoxUI(LoginViewMixin):
                 width=40,
                 height=40,
                 font=("Segoe UI", 16),
-                fg_color="gray30",  # FIXED: Now matches other buttons
-                hover_color="gray40",
+                fg_color=COLORS["bg_hover"],  # FIXED: Now matches other buttons
+                hover_color=COLORS["border"],
                 corner_radius=6,
                 command=toggle_preview,
             )
@@ -3986,8 +4044,8 @@ class LockBoxUI(LoginViewMixin):
                 width=170,
                 height=45,
                 font=("Segoe UI", 13, "bold"),
-                fg_color="gray30",
-                hover_color="gray40",
+                fg_color=COLORS["bg_hover"],
+                hover_color=COLORS["border"],
                 corner_radius=8,
                 command=generate_preview,
             ).pack(side="left", padx=5)
@@ -4304,8 +4362,8 @@ class LockBoxUI(LoginViewMixin):
             width=300,
             height=40,
             font=("Segoe UI", 12),
-            fg_color="gray30",
-            hover_color="gray40",
+            fg_color=COLORS["bg_hover"],
+            hover_color=COLORS["border"],
             command=dialog.destroy,
         ).pack(pady=(0, 20))
 
@@ -4342,6 +4400,9 @@ class LockBoxUI(LoginViewMixin):
             # Also set customtkinter appearance mode
             ctk.set_appearance_mode(theme_name.lower())
 
+            # Save the theme preference
+            self._save_settings(theme=theme_name)
+
             # Refresh the entire vault view
             self.show_vault()
 
@@ -4363,18 +4424,31 @@ class LockBoxUI(LoginViewMixin):
         return f"#{r:02x}{g:02x}{b:02x}"
 
     def _soften_color(self, hex_color):
-        """Create a soft/muted version of a color for backgrounds"""
+        """Create a soft/muted version of a color for backgrounds (theme-aware)"""
         hex_color = hex_color.lstrip("#")
         r, g, b = (
             int(hex_color[0:2], 16),
             int(hex_color[2:4], 16),
             int(hex_color[4:6], 16),
         )
-        # Mix with dark background
-        bg_r, bg_g, bg_b = 30, 30, 30  # Approximate bg_secondary
-        r = int(r * 0.3 + bg_r * 0.7)
-        g = int(g * 0.3 + bg_g * 0.7)
-        b = int(b * 0.3 + bg_b * 0.7)
+        # Get current theme background for mixing
+        bg_hex = COLORS.get("bg_secondary", "#1e1e1e").lstrip("#")
+        bg_r = int(bg_hex[0:2], 16)
+        bg_g = int(bg_hex[2:4], 16)
+        bg_b = int(bg_hex[4:6], 16)
+        
+        # For light themes (bright backgrounds), use more color, less background
+        is_light = (bg_r + bg_g + bg_b) / 3 > 128
+        if is_light:
+            # Light theme: subtle tint (more background, less accent)
+            r = int(r * 0.15 + bg_r * 0.85)
+            g = int(g * 0.15 + bg_g * 0.85)
+            b = int(b * 0.15 + bg_b * 0.85)
+        else:
+            # Dark theme: subtle glow (more background, less accent)
+            r = int(r * 0.3 + bg_r * 0.7)
+            g = int(g * 0.3 + bg_g * 0.7)
+            b = int(b * 0.3 + bg_b * 0.7)
         return f"#{r:02x}{g:02x}{b:02x}"
 
     def show_settings_page(self):
@@ -4446,10 +4520,12 @@ class LockBoxUI(LoginViewMixin):
             width=120,
             height=CTL["h"] - 8,
             font=FONT["body"],
-            fg_color=COLORS["bg_hover"],
-            button_color=COLORS["bg_hover"],
+            fg_color=COLORS["bg_card"],
+            button_color=COLORS["bg_card"],
             button_hover_color=COLORS["accent"],
             dropdown_fg_color=COLORS["bg_card"],
+            dropdown_text_color=COLORS["text_primary"],
+            text_color=COLORS["text_primary"],
             corner_radius=RAD["sm"],
             command=lambda v: self._change_theme(v, dialog),
         )
@@ -4486,16 +4562,27 @@ class LockBoxUI(LoginViewMixin):
             COLORS["accent_hover"] = self._darken_color(color)
             COLORS["accent_soft"] = self._soften_color(color)
 
+            # Determine border color based on theme (dark border for light theme)
+            bg_hex = COLORS.get("bg_secondary", "#1e1e1e").lstrip("#")
+            is_light = (int(bg_hex[0:2], 16) + int(bg_hex[2:4], 16) + int(bg_hex[4:6], 16)) / 3 > 128
+            border_color = "#333333" if is_light else "#ffffff"
+
             # Update button visuals to show selection
             for b in self._accent_buttons:
                 b.configure(border_width=0, border_color=COLORS["bg_card"])
-            btn.configure(border_width=2, border_color="#ffffff")
+            btn.configure(border_width=2, border_color=border_color)
 
-            # Show confirmation
-            messagebox.showinfo(
-                "Accent Color",
-                f"Accent color changed. Changes will apply to new UI elements.",
-            )
+            # Save accent color preference
+            self._save_settings(accent_color=color)
+
+            # Close dialog and refresh UI
+            dialog.destroy()
+            self.show_vault()
+
+        # Determine border color based on theme
+        bg_hex = COLORS.get("bg_secondary", "#1e1e1e").lstrip("#")
+        is_light_theme = (int(bg_hex[0:2], 16) + int(bg_hex[2:4], 16) + int(bg_hex[4:6], 16)) / 3 > 128
+        selection_border = "#333333" if is_light_theme else "#ffffff"
 
         for color, name in accent_colors:
             is_selected = color == current_accent
@@ -4508,7 +4595,7 @@ class LockBoxUI(LoginViewMixin):
                 hover_color=color,
                 corner_radius=14,
                 border_width=2 if is_selected else 0,
-                border_color="#ffffff" if is_selected else COLORS["bg_card"],
+                border_color=selection_border if is_selected else COLORS["bg_card"],
                 command=lambda c=color: None,  # Will be set below
             )
             color_btn.pack(side="left", padx=2)
@@ -4517,6 +4604,37 @@ class LockBoxUI(LoginViewMixin):
             color_btn.configure(
                 command=lambda c=color, b=color_btn: select_accent(c, b)
             )
+
+        # Custom color picker button
+        def pick_custom_color():
+            from tkinter import colorchooser
+
+            color = colorchooser.askcolor(
+                title="Choose Accent Color",
+                initialcolor=COLORS.get("accent", "#3b82f6"),
+            )
+            if color[1]:  # color[1] is the hex value
+                COLORS["accent"] = color[1]
+                COLORS["accent_hover"] = self._darken_color(color[1])
+                COLORS["accent_soft"] = self._soften_color(color[1])
+                # Save accent color preference
+                self._save_settings(accent_color=color[1])
+                dialog.destroy()
+                self.show_vault()
+
+        custom_btn = ctk.CTkButton(
+            accent_frame,
+            text="⋯",
+            width=28,
+            height=28,
+            fg_color=COLORS["bg_hover"],
+            hover_color=COLORS["accent"],
+            text_color=COLORS["text_primary"],
+            corner_radius=14,
+            font=("Segoe UI", 14, "bold"),
+            command=pick_custom_color,
+        )
+        custom_btn.pack(side="left", padx=(6, 0))
 
         # ═══════════════════════════════════════════════════════════════
         # SECURITY SECTION
@@ -4562,10 +4680,12 @@ class LockBoxUI(LoginViewMixin):
             width=100,
             height=CTL["h"] - 8,
             font=FONT["body"],
-            fg_color=COLORS["bg_hover"],
-            button_color=COLORS["bg_hover"],
+            fg_color=COLORS["bg_card"],
+            button_color=COLORS["bg_card"],
             button_hover_color=COLORS["accent"],
             dropdown_fg_color=COLORS["bg_card"],
+            dropdown_text_color=COLORS["text_primary"],
+            text_color=COLORS["text_primary"],
             corner_radius=RAD["sm"],
         )
         autolock_menu.pack(side="right")
@@ -4589,10 +4709,12 @@ class LockBoxUI(LoginViewMixin):
             width=100,
             height=CTL["h"] - 8,
             font=FONT["body"],
-            fg_color=COLORS["bg_hover"],
-            button_color=COLORS["bg_hover"],
+            fg_color=COLORS["bg_card"],
+            button_color=COLORS["bg_card"],
             button_hover_color=COLORS["accent"],
             dropdown_fg_color=COLORS["bg_card"],
+            dropdown_text_color=COLORS["text_primary"],
+            text_color=COLORS["text_primary"],
             corner_radius=RAD["sm"],
         )
         clipboard_menu.pack(side="right")
@@ -5085,7 +5207,7 @@ class LockBoxUI(LoginViewMixin):
                 anchor="w",
             ).pack(side="left")
 
-            ctk.CTkLabel(row, text=action, font=("Segoe UI", 12), anchor="w").pack(
+            ctk.CTkLabel(row, text=action, font=("Segoe UI", 12), anchor="w", text_color=COLORS["text_primary"]).pack(
                 side="left"
             )
 
@@ -5672,8 +5794,8 @@ Try again later.
             width=180,
             height=45,
             font=("Segoe UI", 13, "bold"),
-            fg_color="gray30",
-            hover_color="gray40",
+            fg_color=COLORS["bg_hover"],
+            hover_color=COLORS["border"],
             corner_radius=8,
             command=test_code,
         ).pack(side="left", padx=5)
@@ -5806,8 +5928,8 @@ Try again later.
             width=200,
             height=40,
             font=("Segoe UI", 12),
-            fg_color="gray30",
-            hover_color="gray40",
+            fg_color=COLORS["bg_hover"],
+            hover_color=COLORS["border"],
             command=dialog.destroy,
         ).pack(pady=20)
 

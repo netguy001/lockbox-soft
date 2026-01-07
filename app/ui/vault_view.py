@@ -4309,6 +4309,74 @@ class LockBoxUI(LoginViewMixin):
             command=dialog.destroy,
         ).pack(pady=(0, 20))
 
+    def _change_theme(self, theme_name, dialog=None):
+        """Change the application theme safely"""
+        try:
+            # Close dialog first to prevent freezing
+            if dialog:
+                dialog.destroy()
+
+            # Apply theme change after dialog is closed
+            self.app.after(100, lambda: self._apply_theme(theme_name))
+        except Exception as e:
+            print(f"Theme change error: {e}")
+
+    def _apply_theme(self, theme_name):
+        """Apply theme change and refresh UI"""
+        from app.constants import COLORS, DARK_THEME, LIGHT_THEME
+
+        try:
+            # Determine which theme to use
+            if theme_name.lower() == "light":
+                theme_colors = LIGHT_THEME
+            elif theme_name.lower() == "dark":
+                theme_colors = DARK_THEME
+            else:  # System - detect system preference
+                # Default to dark for now, as system detection is complex
+                theme_colors = DARK_THEME
+
+            # Update COLORS dictionary in place
+            for key, value in theme_colors.items():
+                COLORS[key] = value
+
+            # Also set customtkinter appearance mode
+            ctk.set_appearance_mode(theme_name.lower())
+
+            # Refresh the entire vault view
+            self.show_vault()
+
+        except Exception as e:
+            print(f"Theme apply error: {e}")
+            messagebox.showerror("Error", f"Failed to change theme: {e}")
+
+    def _darken_color(self, hex_color):
+        """Darken a hex color by 15%"""
+        hex_color = hex_color.lstrip("#")
+        r, g, b = (
+            int(hex_color[0:2], 16),
+            int(hex_color[2:4], 16),
+            int(hex_color[4:6], 16),
+        )
+        r = max(0, int(r * 0.85))
+        g = max(0, int(g * 0.85))
+        b = max(0, int(b * 0.85))
+        return f"#{r:02x}{g:02x}{b:02x}"
+
+    def _soften_color(self, hex_color):
+        """Create a soft/muted version of a color for backgrounds"""
+        hex_color = hex_color.lstrip("#")
+        r, g, b = (
+            int(hex_color[0:2], 16),
+            int(hex_color[2:4], 16),
+            int(hex_color[4:6], 16),
+        )
+        # Mix with dark background
+        bg_r, bg_g, bg_b = 30, 30, 30  # Approximate bg_secondary
+        r = int(r * 0.3 + bg_r * 0.7)
+        g = int(g * 0.3 + bg_g * 0.7)
+        b = int(b * 0.3 + bg_b * 0.7)
+        return f"#{r:02x}{g:02x}{b:02x}"
+
     def show_settings_page(self):
         """Display the Settings page with all configuration options"""
         self.reset_activity()
@@ -4383,11 +4451,11 @@ class LockBoxUI(LoginViewMixin):
             button_hover_color=COLORS["accent"],
             dropdown_fg_color=COLORS["bg_card"],
             corner_radius=RAD["sm"],
-            command=lambda v: ctk.set_appearance_mode(v.lower()),
+            command=lambda v: self._change_theme(v, dialog),
         )
         theme_menu.pack(side="right")
 
-        # Accent color (visual only, placeholder)
+        # Accent color
         accent_row = ctk.CTkFrame(appearance_content, fg_color="transparent")
         accent_row.pack(fill="x", pady=SP["xs"])
 
@@ -4398,22 +4466,57 @@ class LockBoxUI(LoginViewMixin):
             text_color=COLORS["text_secondary"],
         ).pack(side="left")
 
-        accent_colors = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6"]
+        accent_colors = [
+            ("#3b82f6", "Blue"),
+            ("#22c55e", "Green"),
+            ("#f59e0b", "Orange"),
+            ("#ef4444", "Red"),
+            ("#8b5cf6", "Purple"),
+        ]
         accent_frame = ctk.CTkFrame(accent_row, fg_color="transparent")
         accent_frame.pack(side="right")
 
-        for color in accent_colors:
+        # Track selected accent
+        self._accent_buttons = []
+        current_accent = COLORS.get("accent", "#3b82f6")
+
+        def select_accent(color, btn):
+            # Update COLORS dict
+            COLORS["accent"] = color
+            COLORS["accent_hover"] = self._darken_color(color)
+            COLORS["accent_soft"] = self._soften_color(color)
+
+            # Update button visuals to show selection
+            for b in self._accent_buttons:
+                b.configure(border_width=0, border_color=COLORS["bg_card"])
+            btn.configure(border_width=2, border_color="#ffffff")
+
+            # Show confirmation
+            messagebox.showinfo(
+                "Accent Color",
+                f"Accent color changed. Changes will apply to new UI elements.",
+            )
+
+        for color, name in accent_colors:
+            is_selected = color == current_accent
             color_btn = ctk.CTkButton(
                 accent_frame,
                 text="",
-                width=24,
-                height=24,
+                width=28,
+                height=28,
                 fg_color=color,
                 hover_color=color,
-                corner_radius=12,
-                command=lambda c=color: None,  # Placeholder
+                corner_radius=14,
+                border_width=2 if is_selected else 0,
+                border_color="#ffffff" if is_selected else COLORS["bg_card"],
+                command=lambda c=color: None,  # Will be set below
             )
             color_btn.pack(side="left", padx=2)
+            self._accent_buttons.append(color_btn)
+            # Set command with button reference
+            color_btn.configure(
+                command=lambda c=color, b=color_btn: select_accent(c, b)
+            )
 
         # ═══════════════════════════════════════════════════════════════
         # SECURITY SECTION

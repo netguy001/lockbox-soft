@@ -1509,27 +1509,9 @@ class LockBoxUI(LoginViewMixin):
             content = ctk.CTkFrame(card, fg_color="transparent")
             content.pack(fill="x", padx=SP["lg"], pady=SP["sm"])
 
-            # Header row: Security indicator + Title + Favorite
+            # Header row: Title + Favorite
             header = ctk.CTkFrame(content, fg_color="transparent")
             header.pack(fill="x")
-
-            # Security health indicator (left dot)
-            if is_weak:
-                indicator_color = COLORS["danger"]
-            elif is_old:
-                indicator_color = COLORS["warning"]
-            else:
-                indicator_color = COLORS["success"]
-
-            indicator = ctk.CTkFrame(
-                header,
-                width=8,
-                height=8,
-                corner_radius=4,
-                fg_color=indicator_color,
-            )
-            indicator.pack(side="left", padx=(0, SP["sm"]))
-            indicator.pack_propagate(False)
 
             # Title
             title = item.get("title", "Untitled")
@@ -1704,34 +1686,57 @@ class LockBoxUI(LoginViewMixin):
             )
             more_btn.pack(side="right")
 
+            # Weak password warning icon (subtle, outline style)
+            if is_weak:
+                warn_btn = ctk.CTkButton(
+                    right_actions,
+                    text="⚠",
+                    width=32,
+                    height=32,
+                    font=("Segoe UI", 14),
+                    fg_color="transparent",
+                    hover_color=COLORS["bg_hover"],
+                    text_color=COLORS["text_muted"],
+                    corner_radius=RAD["sm"],
+                    command=lambda i=item: self.show_edit_password(
+                        i, focus_password=True
+                    ),
+                )
+                warn_btn.pack(side="right", padx=(0, SP["xs"]))
+
+                # Tooltip for weak password warning
+                def show_tooltip(event, btn=warn_btn):
+                    tooltip = ctk.CTkToplevel(self.app)
+                    tooltip.wm_overrideredirect(True)
+                    tooltip.wm_geometry(f"+{event.x_root + 10}+{event.y_root + 10}")
+                    tooltip.attributes("-topmost", True)
+                    ctk.CTkLabel(
+                        tooltip,
+                        text="This password is weak. Edit it to improve security.",
+                        font=FONT["small"],
+                        text_color=COLORS["text_primary"],
+                        fg_color=COLORS["bg_card"],
+                        corner_radius=4,
+                        padx=8,
+                        pady=4,
+                    ).pack()
+                    btn._tooltip = tooltip
+
+                def hide_tooltip(event, btn=warn_btn):
+                    if hasattr(btn, "_tooltip") and btn._tooltip:
+                        btn._tooltip.destroy()
+                        btn._tooltip = None
+
+                warn_btn.bind("<Enter>", show_tooltip)
+                warn_btn.bind("<Leave>", hide_tooltip)
+
             # Apply hover bindings to card and all children after card is fully built
             bind_hover_recursive(card, card)
 
-        # Footer: Contextual security summary
+        # Footer: Item count only
         if items:
-            weak_count = sum(
-                1
-                for i in items
-                if check_password_strength(i.get("password", "")).get("score", 0) < 3
-            )
-
             footer = ctk.CTkFrame(self.items_container, fg_color="transparent")
             footer.pack(fill="x", pady=(SP["lg"], SP["sm"]))
-
-            if weak_count > 0:
-                ctk.CTkLabel(
-                    footer,
-                    text=f"⚠  {weak_count} weak password{'s' if weak_count != 1 else ''} found",
-                    font=FONT["small"],
-                    text_color=COLORS["warning"],
-                ).pack(side="left")
-            else:
-                ctk.CTkLabel(
-                    footer,
-                    text="✓  All passwords are strong",
-                    font=FONT["small"],
-                    text_color=COLORS["success"],
-                ).pack(side="left")
 
             ctk.CTkLabel(
                 footer,
@@ -4273,7 +4278,7 @@ class LockBoxUI(LoginViewMixin):
             command=save,
         ).pack(pady=20)
 
-    def show_edit_password(self, item):
+    def show_edit_password(self, item, focus_password=False):
         """Dialog to edit password"""
         dialog = self.create_dialog("Edit Password", 500, 680)
 
@@ -4298,6 +4303,10 @@ class LockBoxUI(LoginViewMixin):
         password_entry = ctk.CTkEntry(password_frame, width=240, height=40, show="●")
         password_entry.insert(0, item.get("password", ""))
         password_entry.place(x=0, y=0)  # Use place instead of pack
+
+        # Focus password field if requested (for weak password warning)
+        if focus_password:
+            dialog.after(100, lambda: password_entry.focus_set())
 
         # Toggle show/hide password
         show_password = [False]

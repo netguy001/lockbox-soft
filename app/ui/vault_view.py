@@ -407,24 +407,37 @@ class LockBoxUI(LoginViewMixin):
             )
             text_lbl.pack(side="left", fill="x", expand=True)
 
-            # Make entire frame clickable
+            # Make entire frame clickable with hover on entire area
             def make_click_handler(category, frame, icon_l, text_l):
                 def on_enter(e):
                     if category != self.current_category:
                         frame.configure(fg_color=COLORS["bg_hover"])
 
                 def on_leave(e):
-                    if category != self.current_category:
-                        frame.configure(fg_color="transparent")
+                    # Delay the check to allow mouse position to update
+                    def check_leave():
+                        if category != self.current_category:
+                            try:
+                                x, y = frame.winfo_pointerxy()
+                                fx = frame.winfo_rootx()
+                                fy = frame.winfo_rooty()
+                                fw = frame.winfo_width()
+                                fh = frame.winfo_height()
+                                if not (fx <= x <= fx + fw and fy <= y <= fy + fh):
+                                    frame.configure(fg_color="transparent")
+                            except:
+                                frame.configure(fg_color="transparent")
+
+                    self.app.after(10, check_leave)
 
                 def on_click(e):
                     self.switch_category(category)
 
-                frame.bind("<Enter>", on_enter)
-                frame.bind("<Leave>", on_leave)
-                frame.bind("<Button-1>", on_click)
-                icon_l.bind("<Button-1>", on_click)
-                text_l.bind("<Button-1>", on_click)
+                # Bind to frame and all children
+                for widget in [frame, icon_l, text_l]:
+                    widget.bind("<Enter>", on_enter)
+                    widget.bind("<Leave>", on_leave)
+                    widget.bind("<Button-1>", on_click)
 
             make_click_handler(cat, btn_frame, icon_lbl, text_lbl)
 
@@ -486,24 +499,37 @@ class LockBoxUI(LoginViewMixin):
             )
             text_lbl.pack(side="left", fill="x", expand=True)
 
-            # Make entire frame clickable
+            # Make entire frame clickable with hover on entire area
             def make_click_handler(category, frame, icon_l, text_l):
                 def on_enter(e):
                     if category != self.current_category:
                         frame.configure(fg_color=COLORS["bg_hover"])
 
                 def on_leave(e):
-                    if category != self.current_category:
-                        frame.configure(fg_color="transparent")
+                    # Delay the check to allow mouse position to update
+                    def check_leave():
+                        if category != self.current_category:
+                            try:
+                                x, y = frame.winfo_pointerxy()
+                                fx = frame.winfo_rootx()
+                                fy = frame.winfo_rooty()
+                                fw = frame.winfo_width()
+                                fh = frame.winfo_height()
+                                if not (fx <= x <= fx + fw and fy <= y <= fy + fh):
+                                    frame.configure(fg_color="transparent")
+                            except:
+                                frame.configure(fg_color="transparent")
+
+                    self.app.after(10, check_leave)
 
                 def on_click(e):
                     self.switch_category(category)
 
-                frame.bind("<Enter>", on_enter)
-                frame.bind("<Leave>", on_leave)
-                frame.bind("<Button-1>", on_click)
-                icon_l.bind("<Button-1>", on_click)
-                text_l.bind("<Button-1>", on_click)
+                # Bind to frame and all children
+                for widget in [frame, icon_l, text_l]:
+                    widget.bind("<Enter>", on_enter)
+                    widget.bind("<Leave>", on_leave)
+                    widget.bind("<Button-1>", on_click)
 
             make_click_handler(cat, btn_frame, icon_lbl, text_lbl)
 
@@ -513,8 +539,9 @@ class LockBoxUI(LoginViewMixin):
             btn_frame._text_label = text_lbl
             self.category_buttons[cat] = btn_frame
 
-        # Spacer
-        ctk.CTkFrame(sidebar, fg_color="transparent").pack(fill="both", expand=True)
+        # Spacer - flexible but with minimum height to keep utility buttons visible
+        spacer = ctk.CTkFrame(sidebar, fg_color="transparent", height=SP["lg"])
+        spacer.pack(fill="x", pady=(SP["md"], 0))
 
         # Divider before bottom actions
         ctk.CTkFrame(sidebar, fg_color=COLORS["border"], height=2).pack(
@@ -561,24 +588,37 @@ class LockBoxUI(LoginViewMixin):
             )
             text_lbl.pack(side="left", fill="x", expand=True)
 
-            # Make entire frame clickable with hover effect
-            def make_util_click_handler(command, frame):
+            # Make entire frame clickable with hover effect on entire area
+            def make_util_click_handler(command, frame, icon_l, text_l):
                 def on_enter(e):
                     frame.configure(fg_color=COLORS["bg_hover"])
 
                 def on_leave(e):
-                    frame.configure(fg_color="transparent")
+                    # Delay the check to allow mouse position to update
+                    def check_leave():
+                        try:
+                            x, y = frame.winfo_pointerxy()
+                            fx = frame.winfo_rootx()
+                            fy = frame.winfo_rooty()
+                            fw = frame.winfo_width()
+                            fh = frame.winfo_height()
+                            if not (fx <= x <= fx + fw and fy <= y <= fy + fh):
+                                frame.configure(fg_color="transparent")
+                        except:
+                            frame.configure(fg_color="transparent")
+
+                    self.app.after(10, check_leave)
 
                 def on_click(e):
                     command()
 
-                frame.bind("<Enter>", on_enter)
-                frame.bind("<Leave>", on_leave)
-                frame.bind("<Button-1>", on_click)
-                for child in frame.winfo_children():
-                    child.bind("<Button-1>", on_click)
+                # Bind to frame and all children
+                for widget in [frame, icon_l, text_l]:
+                    widget.bind("<Enter>", on_enter)
+                    widget.bind("<Leave>", on_leave)
+                    widget.bind("<Button-1>", on_click)
 
-            make_util_click_handler(cmd, btn_frame)
+            make_util_click_handler(cmd, btn_frame, icon_lbl, text_lbl)
 
             btn_frame._full_text = f"  {icon}    {label}"
             btn_frame._icon_text = icon
@@ -599,7 +639,7 @@ class LockBoxUI(LoginViewMixin):
             corner_radius=RAD["md"],
             command=self.lock_vault,
         )
-        lock_btn.pack(pady=(SP["sm"], SP["md"]), padx=SP["lg"])
+        lock_btn.pack(pady=(SP["sm"], SP["lg"]), padx=SP["lg"])
         lock_btn._full_text = "Lock Vault"
         lock_btn._icon_text = "🔒"
         self.utility_buttons.append(lock_btn)
@@ -799,26 +839,27 @@ class LockBoxUI(LoginViewMixin):
                 command=self.force_collapse_search,
             )
 
-            # Sort dropdown
+            # Sort dropdown with custom toggle button
             sort_options = ["Newest", "Oldest", "A-Z", "Z-A", "Modified"]
-            self.sort_dropdown = ctk.CTkOptionMenu(
+
+            # Sort button that shows current selection with arrow
+            self.sort_btn = ctk.CTkButton(
                 actions,
-                values=sort_options,
-                width=100,
+                text="Newest  ▾",
+                width=110,
                 height=CTL["h"],
                 font=FONT["body"],
-                dropdown_font=FONT["body"],
                 fg_color=COLORS["bg_card"],
-                button_color=COLORS["bg_hover"],
-                button_hover_color=COLORS["accent"],
+                hover_color=COLORS["bg_hover"],
                 text_color=COLORS["text_primary"],
-                dropdown_text_color=COLORS["text_primary"],
-                dropdown_fg_color=COLORS["bg_card"],
                 corner_radius=RAD["md"],
-                command=self.change_sort,
+                command=self._toggle_sort_dropdown,
             )
-            self.sort_dropdown.set("Newest")
-            self.sort_dropdown.pack(side="left", padx=(0, SP["sm"]))
+            self.sort_btn.pack(side="left", padx=(0, SP["sm"]))
+
+            # Dropdown popup (hidden by default)
+            self.sort_dropdown_open = False
+            self.sort_popup = None
 
             # Add button
             ctk.CTkButton(
@@ -969,8 +1010,229 @@ class LockBoxUI(LoginViewMixin):
         }
 
         self.sort_by = sort_map.get(choice, "created_desc")
+        # Update button text with arrow
+        if hasattr(self, "sort_btn"):
+            self.sort_btn.configure(text=f"{choice}  ▾")
         # Defer refresh to avoid layout glitch
         self.app.after(10, self.display_items)
+
+    def _toggle_sort_dropdown(self):
+        """Toggle the custom sort dropdown visibility"""
+        if self.sort_dropdown_open:
+            self._close_sort_dropdown()
+        else:
+            self._open_sort_dropdown()
+
+    def _open_sort_dropdown(self):
+        """Open the sort dropdown popup"""
+        if self.sort_popup is not None:
+            return
+
+        self.sort_dropdown_open = True
+        # Update button text to show arrow pointing up
+        current_text = self.sort_btn.cget("text").replace(" ▾", "").replace(" ▴", "")
+        self.sort_btn.configure(text=f"{current_text}  ▴")
+
+        # Create popup window
+        self.sort_popup = ctk.CTkToplevel(self.app)
+        self.sort_popup.withdraw()
+        self.sort_popup.overrideredirect(True)
+        self.sort_popup.configure(fg_color=COLORS["bg_card"])
+
+        # Add options
+        sort_options = ["Newest", "Oldest", "A-Z", "Z-A", "Modified"]
+        for option in sort_options:
+            opt_btn = ctk.CTkButton(
+                self.sort_popup,
+                text=option,
+                width=120,
+                height=36,
+                font=FONT["body"],
+                fg_color="transparent",
+                hover_color=COLORS["bg_hover"],
+                text_color=COLORS["text_primary"],
+                anchor="w",
+                corner_radius=0,
+                command=lambda o=option: self._select_sort_option(o),
+            )
+            opt_btn.pack(fill="x", padx=2, pady=1)
+
+        # Position popup below the sort button
+        self.app.update_idletasks()
+        x = self.sort_btn.winfo_rootx()
+        y = self.sort_btn.winfo_rooty() + self.sort_btn.winfo_height() + 4
+        self.sort_popup.geometry(f"+{x}+{y}")
+        self.sort_popup.deiconify()
+        self.sort_popup.lift()
+
+        # Close on click outside
+        self.sort_popup.bind("<FocusOut>", lambda e: self._close_sort_dropdown())
+        self.app.bind("<Button-1>", self._check_sort_popup_click, add="+")
+
+    def _check_sort_popup_click(self, event):
+        """Check if click is outside sort popup"""
+        if self.sort_popup is None:
+            return
+        try:
+            widget = event.widget
+            # Check if click is inside popup or sort button
+            popup_x = self.sort_popup.winfo_rootx()
+            popup_y = self.sort_popup.winfo_rooty()
+            popup_w = self.sort_popup.winfo_width()
+            popup_h = self.sort_popup.winfo_height()
+
+            btn_x = self.sort_btn.winfo_rootx()
+            btn_y = self.sort_btn.winfo_rooty()
+            btn_w = self.sort_btn.winfo_width()
+            btn_h = self.sort_btn.winfo_height()
+
+            click_x = event.x_root
+            click_y = event.y_root
+
+            in_popup = (
+                popup_x <= click_x <= popup_x + popup_w
+                and popup_y <= click_y <= popup_y + popup_h
+            )
+            in_btn = (
+                btn_x <= click_x <= btn_x + btn_w and btn_y <= click_y <= btn_y + btn_h
+            )
+
+            if not in_popup and not in_btn:
+                self._close_sort_dropdown()
+        except:
+            pass
+
+    def _close_sort_dropdown(self):
+        """Close the sort dropdown popup"""
+        self.sort_dropdown_open = False
+        if hasattr(self, "sort_btn"):
+            # Update button text to show arrow pointing down
+            current_text = (
+                self.sort_btn.cget("text").replace(" ▾", "").replace(" ▴", "")
+            )
+            self.sort_btn.configure(text=f"{current_text}  ▾")
+        if self.sort_popup is not None:
+            try:
+                self.sort_popup.destroy()
+            except:
+                pass
+            self.sort_popup = None
+        try:
+            self.app.unbind("<Button-1>")
+        except:
+            pass
+
+    def _select_sort_option(self, option):
+        """Select a sort option from dropdown"""
+        self._close_sort_dropdown()
+        self.change_sort(option)
+
+    def _show_context_menu(self, event, menu_items):
+        """Show a styled context menu popup"""
+        # Close any existing context menu
+        if hasattr(self, "_context_menu") and self._context_menu is not None:
+            try:
+                self._context_menu.destroy()
+            except:
+                pass
+
+        # Create popup window
+        self._context_menu = ctk.CTkToplevel(self.app)
+        self._context_menu.withdraw()
+        self._context_menu.overrideredirect(True)
+        self._context_menu.configure(fg_color=COLORS["bg_card"])
+
+        # Add border effect with frame
+        border_frame = ctk.CTkFrame(
+            self._context_menu,
+            fg_color=COLORS["bg_card"],
+            border_width=1,
+            border_color=COLORS["border"],
+            corner_radius=RAD["md"],
+        )
+        border_frame.pack(fill="both", expand=True, padx=1, pady=1)
+
+        # Add menu items
+        for item in menu_items:
+            if item is None:
+                # Separator
+                sep = ctk.CTkFrame(border_frame, fg_color=COLORS["border"], height=1)
+                sep.pack(fill="x", padx=SP["sm"], pady=SP["xs"])
+            else:
+                label = item[0]
+                command = item[1]
+                is_danger = len(item) > 2 and item[2]
+
+                text_color = "#ef4444" if is_danger else COLORS["text_primary"]
+
+                menu_btn = ctk.CTkButton(
+                    border_frame,
+                    text=label,
+                    width=180,
+                    height=36,
+                    font=FONT["body"],
+                    fg_color="transparent",
+                    hover_color=COLORS["bg_hover"],
+                    text_color=text_color,
+                    anchor="w",
+                    corner_radius=RAD["sm"],
+                    command=lambda cmd=command: self._execute_menu_command(cmd),
+                )
+                menu_btn.pack(fill="x", padx=SP["xs"], pady=1)
+
+        # Position popup at mouse - offset to the left so it doesn't go off screen
+        self.app.update_idletasks()
+        menu_width = self._context_menu.winfo_reqwidth()
+        x = self.app.winfo_pointerx() - menu_width - 10
+        y = self.app.winfo_pointery()
+        # Ensure it doesn't go off the left edge
+        if x < 0:
+            x = self.app.winfo_pointerx() + 10
+        self._context_menu.geometry(f"+{x}+{y}")
+        self._context_menu.deiconify()
+        self._context_menu.lift()
+
+        # Close on click outside
+        self.app.bind("<Button-1>", self._check_context_menu_click, add="+")
+
+    def _check_context_menu_click(self, event):
+        """Check if click is outside context menu"""
+        if not hasattr(self, "_context_menu") or self._context_menu is None:
+            return
+        try:
+            popup_x = self._context_menu.winfo_rootx()
+            popup_y = self._context_menu.winfo_rooty()
+            popup_w = self._context_menu.winfo_width()
+            popup_h = self._context_menu.winfo_height()
+
+            click_x = event.x_root
+            click_y = event.y_root
+
+            if not (
+                popup_x <= click_x <= popup_x + popup_w
+                and popup_y <= click_y <= popup_y + popup_h
+            ):
+                self._close_context_menu()
+        except:
+            pass
+
+    def _close_context_menu(self):
+        """Close the context menu"""
+        if hasattr(self, "_context_menu") and self._context_menu is not None:
+            try:
+                self._context_menu.destroy()
+            except:
+                pass
+            self._context_menu = None
+        try:
+            self.app.unbind("<Button-1>")
+        except:
+            pass
+
+    def _execute_menu_command(self, command):
+        """Execute a menu command and close the menu"""
+        self._close_context_menu()
+        command()
 
     def sort_items(self, items):
         """Sort items based on current sort setting"""
@@ -1394,52 +1656,37 @@ class LockBoxUI(LoginViewMixin):
             right_actions.pack(side="right")
 
             def _open_more(event=None, i=item):
-                menu = tk.Menu(self.app, tearoff=0, font=FONT["body"])
-
-                # --- Quick Actions ---
-                menu.add_command(
-                    label="Copy Username",
-                    command=lambda: self.copy_to_clipboard(
-                        i.get("username", ""), "Username"
-                    ),
+                self._show_context_menu(
+                    event,
+                    [
+                        (
+                            "Copy Username",
+                            lambda: self.copy_to_clipboard(
+                                i.get("username", ""), "Username"
+                            ),
+                        ),
+                        (
+                            "Copy URL",
+                            lambda: self.copy_to_clipboard(i.get("url", ""), "URL"),
+                        ),
+                        (
+                            "Open URL in Browser",
+                            lambda: self.open_url(i.get("url", "")),
+                        ),
+                        None,  # Separator
+                        ("Check for Breach", lambda: self.check_password_breach(i)),
+                        ("Show QR Code", lambda: self.show_password_qr(i)),
+                        ("View History", lambda: self.show_password_history(i)),
+                        None,  # Separator
+                        (
+                            "Delete...",
+                            lambda: self.confirm_delete_item(
+                                i["id"], "password", i.get("title", "this item")
+                            ),
+                            True,
+                        ),  # True = danger
+                    ],
                 )
-                menu.add_command(
-                    label="Copy URL",
-                    command=lambda: self.copy_to_clipboard(i.get("url", ""), "URL"),
-                )
-                menu.add_command(
-                    label="Open URL in Browser",
-                    command=lambda: self.open_url(i.get("url", "")),
-                )
-
-                menu.add_separator()
-
-                # --- Security ---
-                menu.add_command(
-                    label="Check for Breach",
-                    command=lambda: self.check_password_breach(i),
-                )
-                menu.add_command(
-                    label="Show QR Code",
-                    command=lambda: self.show_password_qr(i),
-                )
-                menu.add_command(
-                    label="View History",
-                    command=lambda: self.show_password_history(i),
-                )
-
-                menu.add_separator()
-
-                # --- Danger Zone ---
-                menu.add_command(
-                    label="Delete...",
-                    foreground="#ef4444",
-                    command=lambda: self.confirm_delete_item(
-                        i["id"], "password", i.get("title", "this item")
-                    ),
-                )
-
-                menu.tk_popup(self.app.winfo_pointerx(), self.app.winfo_pointery())
 
             more_btn = ctk.CTkButton(
                 right_actions,
@@ -1687,19 +1934,20 @@ class LockBoxUI(LoginViewMixin):
             right_actions.pack(side="right")
 
             def _open_more(event=None, i=item):
-                menu = tk.Menu(self.app, tearoff=0, font=FONT["body"])
-                menu.add_command(
-                    label="Show QR Code", command=lambda: self.show_api_key_qr(i)
+                self._show_context_menu(
+                    event,
+                    [
+                        ("Show QR Code", lambda: self.show_api_key_qr(i)),
+                        None,  # Separator
+                        (
+                            "Delete...",
+                            lambda: self.confirm_delete_item(
+                                i["id"], "api_key", i.get("service", "this item")
+                            ),
+                            True,
+                        ),
+                    ],
                 )
-                menu.add_separator()
-                menu.add_command(
-                    label="Delete...",
-                    foreground="#ef4444",
-                    command=lambda: self.confirm_delete_item(
-                        i["id"], "api_key", i.get("service", "this item")
-                    ),
-                )
-                menu.tk_popup(self.app.winfo_pointerx(), self.app.winfo_pointery())
 
             ctk.CTkButton(
                 right_actions,
@@ -1885,25 +2133,26 @@ class LockBoxUI(LoginViewMixin):
             right_actions.pack(side="right")
 
             def _open_more(event=None, i=item):
-                menu = tk.Menu(self.app, tearoff=0, font=FONT["body"])
-                menu.add_command(
-                    label="Copy Content",
-                    command=lambda: self.copy_to_clipboard(
-                        i.get("content", ""), "Note"
-                    ),
+                self._show_context_menu(
+                    event,
+                    [
+                        (
+                            "Copy Content",
+                            lambda: self.copy_to_clipboard(
+                                i.get("content", ""), "Note"
+                            ),
+                        ),
+                        ("Show QR Code", lambda: self.show_note_qr(i)),
+                        None,  # Separator
+                        (
+                            "Delete...",
+                            lambda: self.confirm_delete_item(
+                                i["id"], "note", i.get("title", "this item")
+                            ),
+                            True,
+                        ),
+                    ],
                 )
-                menu.add_command(
-                    label="Show QR Code", command=lambda: self.show_note_qr(i)
-                )
-                menu.add_separator()
-                menu.add_command(
-                    label="Delete...",
-                    foreground="#ef4444",
-                    command=lambda: self.confirm_delete_item(
-                        i["id"], "note", i.get("title", "this item")
-                    ),
-                )
-                menu.tk_popup(self.app.winfo_pointerx(), self.app.winfo_pointery())
 
             ctk.CTkButton(
                 right_actions,
@@ -2030,19 +2279,20 @@ class LockBoxUI(LoginViewMixin):
             right_actions.pack(side="right")
 
             def _open_more(event=None, i=item):
-                menu = tk.Menu(self.app, tearoff=0, font=FONT["body"])
-                menu.add_command(
-                    label="Show QR Code", command=lambda: self.show_ssh_key_qr(i)
+                self._show_context_menu(
+                    event,
+                    [
+                        ("Show QR Code", lambda: self.show_ssh_key_qr(i)),
+                        None,  # Separator
+                        (
+                            "Delete...",
+                            lambda: self.confirm_delete_item(
+                                i["id"], "ssh_key", i.get("name", "this item")
+                            ),
+                            True,
+                        ),
+                    ],
                 )
-                menu.add_separator()
-                menu.add_command(
-                    label="Delete...",
-                    foreground="#ef4444",
-                    command=lambda: self.confirm_delete_item(
-                        i["id"], "ssh_key", i.get("name", "this item")
-                    ),
-                )
-                menu.tk_popup(self.app.winfo_pointerx(), self.app.winfo_pointery())
 
             ctk.CTkButton(
                 right_actions,
@@ -2146,15 +2396,18 @@ class LockBoxUI(LoginViewMixin):
             right_actions.pack(side="right")
 
             def _open_more(event=None, i=item):
-                menu = tk.Menu(self.app, tearoff=0, font=FONT["body"])
-                menu.add_command(
-                    label="Delete...",
-                    foreground="#ef4444",
-                    command=lambda: self.confirm_delete_item(
-                        i["id"], "file", i.get("filename", "this file")
-                    ),
+                self._show_context_menu(
+                    event,
+                    [
+                        (
+                            "Delete...",
+                            lambda: self.confirm_delete_item(
+                                i["id"], "file", i.get("filename", "this file")
+                            ),
+                            True,
+                        ),
+                    ],
                 )
-                menu.tk_popup(self.app.winfo_pointerx(), self.app.winfo_pointery())
 
             ctk.CTkButton(
                 right_actions,
@@ -2293,15 +2546,20 @@ class LockBoxUI(LoginViewMixin):
             right_actions.pack(side="right")
 
             def _open_more(event=None, i=item):
-                menu = tk.Menu(self.app, tearoff=0, font=FONT["body"])
-                menu.add_command(
-                    label="Delete...",
-                    foreground="#ef4444",
-                    command=lambda: self.confirm_delete_item(
-                        i["id"], "encrypted_folder", i.get("folder_name", "this folder")
-                    ),
+                self._show_context_menu(
+                    event,
+                    [
+                        (
+                            "Delete...",
+                            lambda: self.confirm_delete_item(
+                                i["id"],
+                                "encrypted_folder",
+                                i.get("folder_name", "this folder"),
+                            ),
+                            True,
+                        ),
+                    ],
                 )
-                menu.tk_popup(self.app.winfo_pointerx(), self.app.winfo_pointery())
 
             ctk.CTkButton(
                 right_actions,
@@ -5770,15 +6028,18 @@ Try again later.
             right_actions.pack(side="right")
 
             def _open_more(event=None, i=item):
-                menu = tk.Menu(self.app, tearoff=0, font=FONT["body"])
-                menu.add_command(
-                    label="Delete...",
-                    foreground="#ef4444",
-                    command=lambda: self.confirm_delete_item(
-                        i["id"], "totp", i.get("name", "this code")
-                    ),
+                self._show_context_menu(
+                    event,
+                    [
+                        (
+                            "Delete...",
+                            lambda: self.confirm_delete_item(
+                                i["id"], "totp", i.get("name", "this code")
+                            ),
+                            True,
+                        ),
+                    ],
                 )
-                menu.tk_popup(self.app.winfo_pointerx(), self.app.winfo_pointery())
 
             ctk.CTkButton(
                 right_actions,

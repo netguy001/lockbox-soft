@@ -779,9 +779,17 @@ class LockBoxUI(LoginViewMixin):
             display_fn = self.display_encrypted_folder_items
         elif self.current_category == "security":
             self.display_security_dashboard()
+            # Pack items_container back after adding content
+            if hasattr(self, "items_container"):
+                self.items_container.update_idletasks()
+                self.items_container.pack(fill="both", expand=True)
             return
         elif self.current_category == "bulk_delete":  # NEW
             self.display_bulk_delete()
+            # Pack items_container back after adding content
+            if hasattr(self, "items_container"):
+                self.items_container.update_idletasks()
+                self.items_container.pack(fill="both", expand=True)
             return
 
         # Search filter
@@ -1311,85 +1319,132 @@ class LockBoxUI(LoginViewMixin):
             card = ctk.CTkFrame(
                 self.items_container,
                 fg_color=COLORS["bg_card"],
-                corner_radius=RAD["lg"],
+                corner_radius=RAD["md"],
                 border_width=1,
                 border_color=COLORS["border"],
             )
-            card.pack(fill="x", pady=SP["xs"], padx=0)
+            card.pack(fill="x", pady=3, padx=0)
 
-            inner = ctk.CTkFrame(card, fg_color="transparent")
-            inner.pack(fill="x", padx=SP["lg"], pady=SP["md"])
+            # Hover effect helper
+            def bind_hover_recursive(widget, card_ref):
+                widget.bind(
+                    "<Enter>",
+                    lambda e, c=card_ref: c.configure(border_color=COLORS["accent"]),
+                )
+                widget.bind(
+                    "<Leave>",
+                    lambda e, c=card_ref: c.configure(border_color=COLORS["border"]),
+                )
+                for child in widget.winfo_children():
+                    bind_hover_recursive(child, card_ref)
 
-            # Title
+            content = ctk.CTkFrame(card, fg_color="transparent")
+            content.pack(fill="x", padx=SP["lg"], pady=SP["sm"])
+
+            # Header: Title + Favorite
+            header = ctk.CTkFrame(content, fg_color="transparent")
+            header.pack(fill="x")
+
+            # Service name as title
             service = item.get("service", "Untitled")
             ctk.CTkLabel(
-                inner,
+                header,
                 text=service,
                 font=FONT["h3"],
                 text_color=COLORS["text_primary"],
-            ).pack(anchor="w")
+            ).pack(side="left")
 
-            # Description
+            # Metadata row
+            meta = ctk.CTkFrame(content, fg_color="transparent")
+            meta.pack(fill="x", pady=(SP["xs"], 0))
+
+            # Description with icon
             if item.get("description"):
                 ctk.CTkLabel(
-                    inner,
-                    text=item["description"],
+                    meta,
+                    text="📝",
                     font=FONT["small"],
-                    text_color=COLORS["text_secondary"],
-                ).pack(anchor="w", pady=(SP["xs"], 0))
+                    text_color=COLORS["text_muted"],
+                ).pack(side="left")
+                ctk.CTkLabel(
+                    meta,
+                    text=item["description"][:50]
+                    + ("…" if len(item.get("description", "")) > 50 else ""),
+                    font=FONT["small"],
+                    text_color=COLORS["text_muted"],
+                ).pack(side="left", padx=(4, 0))
 
-            # Actions
-            actions_row = ctk.CTkFrame(inner, fg_color="transparent")
-            actions_row.pack(fill="x", pady=(SP["md"], 0))
+            # Actions row
+            actions = ctk.CTkFrame(content, fg_color="transparent")
+            actions.pack(fill="x", pady=(SP["sm"], 0))
+
+            # Left actions
+            left_actions = ctk.CTkFrame(actions, fg_color="transparent")
+            left_actions.pack(side="left")
 
             ctk.CTkButton(
-                actions_row,
-                text="Copy",
-                width=70,
-                height=CTL["h"],
+                left_actions,
+                text="Copy API Key",
+                width=100,
+                height=32,
                 font=FONT["button"],
                 fg_color=COLORS["accent"],
                 hover_color=COLORS["accent_hover"],
-                corner_radius=RAD["md"],
+                corner_radius=RAD["sm"],
                 command=lambda k=item["key"]: self.copy_to_clipboard(k, "API Key"),
             ).pack(side="left", padx=(0, SP["sm"]))
 
             ctk.CTkButton(
-                actions_row,
+                left_actions,
                 text="Edit",
-                width=60,
-                height=CTL["h"],
+                width=55,
+                height=32,
                 font=FONT["button"],
-                fg_color=COLORS["bg_hover"],
-                hover_color=COLORS["border"],
+                fg_color="transparent",
+                hover_color=COLORS["bg_hover"],
                 text_color=COLORS["text_secondary"],
-                corner_radius=RAD["md"],
+                border_width=1,
+                border_color=COLORS["border"],
+                corner_radius=RAD["sm"],
                 command=lambda i=item: self.show_edit_api_key(i),
-            ).pack(side="left", padx=(0, SP["sm"]))
+            ).pack(side="left")
+
+            # Right actions (more menu)
+            right_actions = ctk.CTkFrame(actions, fg_color="transparent")
+            right_actions.pack(side="right")
 
             def _open_more(event=None, i=item):
                 menu = tk.Menu(self.app, tearoff=0, font=FONT["body"])
                 menu.add_command(
-                    label="Show QR", command=lambda: self.show_api_key_qr(i)
+                    label="Show QR Code", command=lambda: self.show_api_key_qr(i)
                 )
                 menu.add_separator()
                 menu.add_command(
-                    label="Delete", command=lambda: self.delete_item(i["id"], "api_key")
+                    label="Delete...",
+                    foreground="#ef4444",
+                    command=lambda: self.confirm_delete_item(
+                        i["id"], "api_key", i.get("service", "this item")
+                    ),
                 )
                 menu.tk_popup(self.app.winfo_pointerx(), self.app.winfo_pointery())
 
             ctk.CTkButton(
-                actions_row,
-                text="⋯",
+                right_actions,
+                text="•••",
                 width=40,
-                height=CTL["h"],
-                font=FONT["h3"],
+                height=32,
+                font=("Segoe UI", 16),
                 fg_color="transparent",
                 hover_color=COLORS["bg_hover"],
                 text_color=COLORS["text_muted"],
-                corner_radius=RAD["md"],
+                border_width=1,
+                border_color=COLORS["border"],
+                corner_radius=RAD["sm"],
                 command=_open_more,
-            ).pack(side="left")
+            ).pack(side="right")
+
+            # Apply hover bindings
+            bind_hover_recursive(card, card)
         # Auto-refresh every 1 second if there are TOTP items
         if items and self.current_category == "totp_codes":
             # Cancel previous timer if exists
@@ -1460,86 +1515,140 @@ class LockBoxUI(LoginViewMixin):
             card = ctk.CTkFrame(
                 self.items_container,
                 fg_color=COLORS["bg_card"],
-                corner_radius=RAD["lg"],
+                corner_radius=RAD["md"],
                 border_width=1,
                 border_color=COLORS["border"],
             )
-            card.pack(fill="x", pady=SP["xs"], padx=0)
+            card.pack(fill="x", pady=3, padx=0)
 
-            inner = ctk.CTkFrame(card, fg_color="transparent")
-            inner.pack(fill="x", padx=SP["lg"], pady=SP["md"])
+            # Hover effect helper
+            def bind_hover_recursive(widget, card_ref):
+                widget.bind(
+                    "<Enter>",
+                    lambda e, c=card_ref: c.configure(border_color=COLORS["accent"]),
+                )
+                widget.bind(
+                    "<Leave>",
+                    lambda e, c=card_ref: c.configure(border_color=COLORS["border"]),
+                )
+                for child in widget.winfo_children():
+                    bind_hover_recursive(child, card_ref)
 
-            # Title
+            content = ctk.CTkFrame(card, fg_color="transparent")
+            content.pack(fill="x", padx=SP["lg"], pady=SP["sm"])
+
+            # Header: Title
+            header = ctk.CTkFrame(content, fg_color="transparent")
+            header.pack(fill="x")
+
+            # Note icon
+            ctk.CTkLabel(
+                header,
+                text="📄",
+                font=FONT["body"],
+                text_color=COLORS["text_muted"],
+            ).pack(side="left", padx=(0, SP["xs"]))
+
             title = item.get("title", "Untitled")
             ctk.CTkLabel(
-                inner,
+                header,
                 text=title,
                 font=FONT["h3"],
                 text_color=COLORS["text_primary"],
-            ).pack(anchor="w")
+            ).pack(side="left")
 
-            # Preview
+            # Preview row
+            meta = ctk.CTkFrame(content, fg_color="transparent")
+            meta.pack(fill="x", pady=(SP["xs"], 0))
+
             preview = item.get("content", "")
-            if len(preview) > 100:
-                preview = preview[:100] + "…"
+            if len(preview) > 80:
+                preview = preview[:80] + "…"
             if preview:
                 ctk.CTkLabel(
-                    inner,
+                    meta,
                     text=preview,
                     font=FONT["small"],
-                    text_color=COLORS["text_secondary"],
-                ).pack(anchor="w", pady=(SP["xs"], 0))
+                    text_color=COLORS["text_muted"],
+                ).pack(side="left")
 
-            # Actions
-            actions_row = ctk.CTkFrame(inner, fg_color="transparent")
-            actions_row.pack(fill="x", pady=(SP["md"], 0))
+            # Actions row
+            actions = ctk.CTkFrame(content, fg_color="transparent")
+            actions.pack(fill="x", pady=(SP["sm"], 0))
+
+            # Left actions
+            left_actions = ctk.CTkFrame(actions, fg_color="transparent")
+            left_actions.pack(side="left")
 
             ctk.CTkButton(
-                actions_row,
-                text="View",
-                width=70,
-                height=CTL["h"],
+                left_actions,
+                text="View Note",
+                width=85,
+                height=32,
                 font=FONT["button"],
                 fg_color=COLORS["accent"],
                 hover_color=COLORS["accent_hover"],
-                corner_radius=RAD["md"],
+                corner_radius=RAD["sm"],
                 command=lambda n=item: self.view_note(n),
             ).pack(side="left", padx=(0, SP["sm"]))
 
             ctk.CTkButton(
-                actions_row,
+                left_actions,
                 text="Edit",
-                width=60,
-                height=CTL["h"],
+                width=55,
+                height=32,
                 font=FONT["button"],
-                fg_color=COLORS["bg_hover"],
-                hover_color=COLORS["border"],
+                fg_color="transparent",
+                hover_color=COLORS["bg_hover"],
                 text_color=COLORS["text_secondary"],
-                corner_radius=RAD["md"],
+                border_width=1,
+                border_color=COLORS["border"],
+                corner_radius=RAD["sm"],
                 command=lambda i=item: self.show_edit_note(i),
-            ).pack(side="left", padx=(0, SP["sm"]))
+            ).pack(side="left")
+
+            # Right actions (more menu)
+            right_actions = ctk.CTkFrame(actions, fg_color="transparent")
+            right_actions.pack(side="right")
 
             def _open_more(event=None, i=item):
                 menu = tk.Menu(self.app, tearoff=0, font=FONT["body"])
-                menu.add_command(label="Show QR", command=lambda: self.show_note_qr(i))
+                menu.add_command(
+                    label="Copy Content",
+                    command=lambda: self.copy_to_clipboard(
+                        i.get("content", ""), "Note"
+                    ),
+                )
+                menu.add_command(
+                    label="Show QR Code", command=lambda: self.show_note_qr(i)
+                )
                 menu.add_separator()
                 menu.add_command(
-                    label="Delete", command=lambda: self.delete_item(i["id"], "note")
+                    label="Delete...",
+                    foreground="#ef4444",
+                    command=lambda: self.confirm_delete_item(
+                        i["id"], "note", i.get("title", "this item")
+                    ),
                 )
                 menu.tk_popup(self.app.winfo_pointerx(), self.app.winfo_pointery())
 
             ctk.CTkButton(
-                actions_row,
-                text="⋯",
+                right_actions,
+                text="•••",
                 width=40,
-                height=CTL["h"],
-                font=FONT["h3"],
+                height=32,
+                font=("Segoe UI", 16),
                 fg_color="transparent",
                 hover_color=COLORS["bg_hover"],
                 text_color=COLORS["text_muted"],
-                corner_radius=RAD["md"],
+                border_width=1,
+                border_color=COLORS["border"],
+                corner_radius=RAD["sm"],
                 command=_open_more,
-            ).pack(side="left")
+            ).pack(side="right")
+
+            # Apply hover bindings
+            bind_hover_recursive(card, card)
 
     def display_ssh_key_items(self, items):
         """Display SSH keys with professional card design"""
@@ -1547,37 +1656,64 @@ class LockBoxUI(LoginViewMixin):
             card = ctk.CTkFrame(
                 self.items_container,
                 fg_color=COLORS["bg_card"],
-                corner_radius=RAD["lg"],
+                corner_radius=RAD["md"],
                 border_width=1,
                 border_color=COLORS["border"],
             )
-            card.pack(fill="x", pady=SP["xs"], padx=0)
+            card.pack(fill="x", pady=3, padx=0)
 
-            inner = ctk.CTkFrame(card, fg_color="transparent")
-            inner.pack(fill="x", padx=SP["lg"], pady=SP["md"])
+            # Hover effect helper
+            def bind_hover_recursive(widget, card_ref):
+                widget.bind(
+                    "<Enter>",
+                    lambda e, c=card_ref: c.configure(border_color=COLORS["accent"]),
+                )
+                widget.bind(
+                    "<Leave>",
+                    lambda e, c=card_ref: c.configure(border_color=COLORS["border"]),
+                )
+                for child in widget.winfo_children():
+                    bind_hover_recursive(child, card_ref)
 
-            # Title
+            content = ctk.CTkFrame(card, fg_color="transparent")
+            content.pack(fill="x", padx=SP["lg"], pady=SP["sm"])
+
+            # Header: Key icon + Title
+            header = ctk.CTkFrame(content, fg_color="transparent")
+            header.pack(fill="x")
+
+            ctk.CTkLabel(
+                header,
+                text="🔑",
+                font=FONT["body"],
+                text_color=COLORS["text_muted"],
+            ).pack(side="left", padx=(0, SP["xs"]))
+
             name = item.get("name", "Untitled")
             ctk.CTkLabel(
-                inner,
+                header,
                 text=name,
                 font=FONT["h3"],
                 text_color=COLORS["text_primary"],
-            ).pack(anchor="w")
+            ).pack(side="left")
 
-            # Actions
-            actions_row = ctk.CTkFrame(inner, fg_color="transparent")
-            actions_row.pack(fill="x", pady=(SP["md"], 0))
+            # Actions row
+            actions = ctk.CTkFrame(content, fg_color="transparent")
+            actions.pack(fill="x", pady=(SP["sm"], 0))
+
+            # Left actions
+            left_actions = ctk.CTkFrame(actions, fg_color="transparent")
+            left_actions.pack(side="left")
 
             ctk.CTkButton(
-                actions_row,
+                left_actions,
                 text="Copy Private",
                 width=100,
-                height=CTL["h"],
+                height=32,
                 font=FONT["button"],
                 fg_color=COLORS["accent"],
                 hover_color=COLORS["accent_hover"],
-                corner_radius=RAD["md"],
+                corner_radius=RAD["sm"],
                 command=lambda k=item["private_key"]: self.copy_to_clipboard(
                     k, "SSH Key"
                 ),
@@ -1585,56 +1721,73 @@ class LockBoxUI(LoginViewMixin):
 
             if item.get("public_key"):
                 ctk.CTkButton(
-                    actions_row,
+                    left_actions,
                     text="Copy Public",
                     width=100,
-                    height=CTL["h"],
+                    height=32,
                     font=FONT["button"],
-                    fg_color=COLORS["bg_hover"],
-                    hover_color=COLORS["border"],
+                    fg_color="transparent",
+                    hover_color=COLORS["bg_hover"],
                     text_color=COLORS["text_secondary"],
-                    corner_radius=RAD["md"],
+                    border_width=1,
+                    border_color=COLORS["border"],
+                    corner_radius=RAD["sm"],
                     command=lambda k=item["public_key"]: self.copy_to_clipboard(
                         k, "Public Key"
                     ),
                 ).pack(side="left", padx=(0, SP["sm"]))
 
             ctk.CTkButton(
-                actions_row,
+                left_actions,
                 text="Edit",
-                width=60,
-                height=CTL["h"],
+                width=55,
+                height=32,
                 font=FONT["button"],
-                fg_color=COLORS["bg_hover"],
-                hover_color=COLORS["border"],
+                fg_color="transparent",
+                hover_color=COLORS["bg_hover"],
                 text_color=COLORS["text_secondary"],
-                corner_radius=RAD["md"],
+                border_width=1,
+                border_color=COLORS["border"],
+                corner_radius=RAD["sm"],
                 command=lambda i=item: self.show_edit_ssh_key(i),
-            ).pack(side="left", padx=(0, SP["sm"]))
+            ).pack(side="left")
+
+            # Right actions (more menu)
+            right_actions = ctk.CTkFrame(actions, fg_color="transparent")
+            right_actions.pack(side="right")
 
             def _open_more(event=None, i=item):
                 menu = tk.Menu(self.app, tearoff=0, font=FONT["body"])
                 menu.add_command(
-                    label="Show QR", command=lambda: self.show_ssh_key_qr(i)
+                    label="Show QR Code", command=lambda: self.show_ssh_key_qr(i)
                 )
                 menu.add_separator()
                 menu.add_command(
-                    label="Delete", command=lambda: self.delete_item(i["id"], "ssh_key")
+                    label="Delete...",
+                    foreground="#ef4444",
+                    command=lambda: self.confirm_delete_item(
+                        i["id"], "ssh_key", i.get("name", "this item")
+                    ),
                 )
                 menu.tk_popup(self.app.winfo_pointerx(), self.app.winfo_pointery())
 
             ctk.CTkButton(
-                actions_row,
-                text="⋯",
+                right_actions,
+                text="•••",
                 width=40,
-                height=CTL["h"],
-                font=FONT["h3"],
+                height=32,
+                font=("Segoe UI", 16),
                 fg_color="transparent",
                 hover_color=COLORS["bg_hover"],
                 text_color=COLORS["text_muted"],
-                corner_radius=RAD["md"],
+                border_width=1,
+                border_color=COLORS["border"],
+                corner_radius=RAD["sm"],
                 command=_open_more,
-            ).pack(side="left")
+            ).pack(side="right")
+
+            # Apply hover bindings
+            bind_hover_recursive(card, card)
 
     def display_file_items(self, items):
         """Display encrypted files with professional card design"""
@@ -1642,71 +1795,111 @@ class LockBoxUI(LoginViewMixin):
             card = ctk.CTkFrame(
                 self.items_container,
                 fg_color=COLORS["bg_card"],
-                corner_radius=RAD["lg"],
+                corner_radius=RAD["md"],
                 border_width=1,
                 border_color=COLORS["border"],
             )
-            card.pack(fill="x", pady=SP["xs"], padx=0)
+            card.pack(fill="x", pady=3, padx=0)
 
-            inner = ctk.CTkFrame(card, fg_color="transparent")
-            inner.pack(fill="x", padx=SP["lg"], pady=SP["md"])
+            # Hover effect helper
+            def bind_hover_recursive(widget, card_ref):
+                widget.bind(
+                    "<Enter>",
+                    lambda e, c=card_ref: c.configure(border_color=COLORS["accent"]),
+                )
+                widget.bind(
+                    "<Leave>",
+                    lambda e, c=card_ref: c.configure(border_color=COLORS["border"]),
+                )
+                for child in widget.winfo_children():
+                    bind_hover_recursive(child, card_ref)
 
-            # Title row
-            top_row = ctk.CTkFrame(inner, fg_color="transparent")
-            top_row.pack(fill="x")
+            content = ctk.CTkFrame(card, fg_color="transparent")
+            content.pack(fill="x", padx=SP["lg"], pady=SP["sm"])
+
+            # Header: File icon + Filename + Size
+            header = ctk.CTkFrame(content, fg_color="transparent")
+            header.pack(fill="x")
+
+            ctk.CTkLabel(
+                header,
+                text="📁",
+                font=FONT["body"],
+                text_color=COLORS["text_muted"],
+            ).pack(side="left", padx=(0, SP["xs"]))
 
             filename = item.get("filename", "Untitled")
             ctk.CTkLabel(
-                top_row,
+                header,
                 text=filename,
                 font=FONT["h3"],
                 text_color=COLORS["text_primary"],
             ).pack(side="left")
 
-            # Size info
+            # Size info on right
             size_kb = item.get("size", 0) / 1024
+            size_text = (
+                f"{size_kb:.1f} KB" if size_kb < 1024 else f"{size_kb/1024:.1f} MB"
+            )
             ctk.CTkLabel(
-                top_row,
-                text=f"{size_kb:.1f} KB",
+                header,
+                text=size_text,
                 font=FONT["small"],
                 text_color=COLORS["text_muted"],
             ).pack(side="right")
 
-            # Actions
-            actions_row = ctk.CTkFrame(inner, fg_color="transparent")
-            actions_row.pack(fill="x", pady=(SP["md"], 0))
+            # Actions row
+            actions = ctk.CTkFrame(content, fg_color="transparent")
+            actions.pack(fill="x", pady=(SP["sm"], 0))
+
+            # Left actions
+            left_actions = ctk.CTkFrame(actions, fg_color="transparent")
+            left_actions.pack(side="left")
 
             ctk.CTkButton(
-                actions_row,
-                text="Export",
-                width=70,
-                height=CTL["h"],
+                left_actions,
+                text="Export File",
+                width=90,
+                height=32,
                 font=FONT["button"],
                 fg_color=COLORS["accent"],
                 hover_color=COLORS["accent_hover"],
-                corner_radius=RAD["md"],
+                corner_radius=RAD["sm"],
                 command=lambda i=item["id"], n=item["filename"]: self.export_file(i, n),
-            ).pack(side="left", padx=(0, SP["sm"]))
+            ).pack(side="left")
+
+            # Right actions (more menu)
+            right_actions = ctk.CTkFrame(actions, fg_color="transparent")
+            right_actions.pack(side="right")
 
             def _open_more(event=None, i=item):
                 menu = tk.Menu(self.app, tearoff=0, font=FONT["body"])
                 menu.add_command(
-                    label="Delete", command=lambda: self.delete_item(i["id"], "file")
+                    label="Delete...",
+                    foreground="#ef4444",
+                    command=lambda: self.confirm_delete_item(
+                        i["id"], "file", i.get("filename", "this file")
+                    ),
                 )
                 menu.tk_popup(self.app.winfo_pointerx(), self.app.winfo_pointery())
 
             ctk.CTkButton(
-                actions_row,
-                text="⋯",
+                right_actions,
+                text="•••",
                 width=40,
-                height=CTL["h"],
-                font=FONT["h3"],
+                height=32,
+                font=("Segoe UI", 16),
                 fg_color="transparent",
                 hover_color=COLORS["bg_hover"],
                 text_color=COLORS["text_muted"],
-                corner_radius=RAD["md"],
+                border_width=1,
+                border_color=COLORS["border"],
+                corner_radius=RAD["sm"],
                 command=_open_more,
-            ).pack(side="left")
+            ).pack(side="right")
+
+            # Apply hover bindings
+            bind_hover_recursive(card, card)
 
     def display_encrypted_folder_items(self, items):
         """Display folder metadata with professional card design"""
@@ -1714,384 +1907,508 @@ class LockBoxUI(LoginViewMixin):
             card = ctk.CTkFrame(
                 self.items_container,
                 fg_color=COLORS["bg_card"],
-                corner_radius=RAD["lg"],
+                corner_radius=RAD["md"],
                 border_width=1,
                 border_color=COLORS["border"],
             )
-            card.pack(fill="x", pady=SP["xs"], padx=0)
+            card.pack(fill="x", pady=3, padx=0)
 
-            inner = ctk.CTkFrame(card, fg_color="transparent")
-            inner.pack(fill="x", padx=SP["lg"], pady=SP["md"])
+            # Hover effect helper
+            def bind_hover_recursive(widget, card_ref):
+                widget.bind(
+                    "<Enter>",
+                    lambda e, c=card_ref: c.configure(border_color=COLORS["accent"]),
+                )
+                widget.bind(
+                    "<Leave>",
+                    lambda e, c=card_ref: c.configure(border_color=COLORS["border"]),
+                )
+                for child in widget.winfo_children():
+                    bind_hover_recursive(child, card_ref)
 
-            # Title row
-            top_row = ctk.CTkFrame(inner, fg_color="transparent")
-            top_row.pack(fill="x")
+            content = ctk.CTkFrame(card, fg_color="transparent")
+            content.pack(fill="x", padx=SP["lg"], pady=SP["sm"])
 
-            folder_name = item.get("folder_name", "Untitled")
-            display_name = folder_name
-            if item.get("zip_password"):
-                display_name += " 🔒"
+            # Header: Folder icon + Name + Lock icon if protected
+            header = ctk.CTkFrame(content, fg_color="transparent")
+            header.pack(fill="x")
 
             ctk.CTkLabel(
-                top_row,
-                text=display_name,
+                header,
+                text="📂",
+                font=FONT["body"],
+                text_color=COLORS["text_muted"],
+            ).pack(side="left", padx=(0, SP["xs"]))
+
+            folder_name = item.get("folder_name", "Untitled")
+            ctk.CTkLabel(
+                header,
+                text=folder_name,
                 font=FONT["h3"],
                 text_color=COLORS["text_primary"],
             ).pack(side="left")
 
-            # Size/count info
+            if item.get("zip_password"):
+                ctk.CTkLabel(
+                    header,
+                    text="🔒",
+                    font=FONT["body"],
+                    text_color=COLORS["success"],
+                ).pack(side="left", padx=(SP["xs"], 0))
+
+            # Size/count info on right
             size_mb = item.get("size", 0) / (1024 * 1024)
             file_count = item.get("file_count", 0)
             ctk.CTkLabel(
-                top_row,
+                header,
                 text=f"{file_count} files · {size_mb:.1f} MB",
                 font=FONT["small"],
                 text_color=COLORS["text_muted"],
             ).pack(side="right")
 
-            # Description
+            # Description row
             if item.get("description"):
+                meta = ctk.CTkFrame(content, fg_color="transparent")
+                meta.pack(fill="x", pady=(SP["xs"], 0))
                 ctk.CTkLabel(
-                    inner,
-                    text=item["description"],
+                    meta,
+                    text=item["description"][:60]
+                    + ("…" if len(item.get("description", "")) > 60 else ""),
                     font=FONT["small"],
-                    text_color=COLORS["text_secondary"],
-                ).pack(anchor="w", pady=(SP["xs"], 0))
+                    text_color=COLORS["text_muted"],
+                ).pack(side="left")
 
-            # Actions
-            actions_row = ctk.CTkFrame(inner, fg_color="transparent")
-            actions_row.pack(fill="x", pady=(SP["md"], 0))
+            # Actions row
+            actions = ctk.CTkFrame(content, fg_color="transparent")
+            actions.pack(fill="x", pady=(SP["sm"], 0))
+
+            # Left actions
+            left_actions = ctk.CTkFrame(actions, fg_color="transparent")
+            left_actions.pack(side="left")
 
             ctk.CTkButton(
-                actions_row,
+                left_actions,
                 text="Download",
                 width=90,
-                height=CTL["h"],
+                height=32,
                 font=FONT["button"],
                 fg_color=COLORS["accent"],
                 hover_color=COLORS["accent_hover"],
-                corner_radius=RAD["md"],
+                corner_radius=RAD["sm"],
                 command=lambda i=item["id"], n=item[
                     "folder_name"
                 ]: self.download_folder_zip(i, n),
             ).pack(side="left", padx=(0, SP["sm"]))
 
             ctk.CTkButton(
-                actions_row,
-                text="Password",
-                width=80,
-                height=CTL["h"],
+                left_actions,
+                text="Set Password",
+                width=100,
+                height=32,
                 font=FONT["button"],
-                fg_color=COLORS["bg_hover"],
-                hover_color=COLORS["border"],
+                fg_color="transparent",
+                hover_color=COLORS["bg_hover"],
                 text_color=COLORS["text_secondary"],
-                corner_radius=RAD["md"],
+                border_width=1,
+                border_color=COLORS["border"],
+                corner_radius=RAD["sm"],
                 command=lambda i=item["id"]: self.set_folder_password(i),
-            ).pack(side="left", padx=(0, SP["sm"]))
+            ).pack(side="left")
+
+            # Right actions (more menu)
+            right_actions = ctk.CTkFrame(actions, fg_color="transparent")
+            right_actions.pack(side="right")
 
             def _open_more(event=None, i=item):
                 menu = tk.Menu(self.app, tearoff=0, font=FONT["body"])
                 menu.add_command(
-                    label="Delete",
-                    command=lambda: self.delete_item(i["id"], "encrypted_folder"),
+                    label="Delete...",
+                    foreground="#ef4444",
+                    command=lambda: self.confirm_delete_item(
+                        i["id"], "encrypted_folder", i.get("folder_name", "this folder")
+                    ),
                 )
                 menu.tk_popup(self.app.winfo_pointerx(), self.app.winfo_pointery())
 
             ctk.CTkButton(
-                actions_row,
-                text="⋯",
+                right_actions,
+                text="•••",
                 width=40,
-                height=CTL["h"],
-                font=FONT["h3"],
+                height=32,
+                font=("Segoe UI", 16),
                 fg_color="transparent",
                 hover_color=COLORS["bg_hover"],
                 text_color=COLORS["text_muted"],
-                corner_radius=RAD["md"],
+                border_width=1,
+                border_color=COLORS["border"],
+                corner_radius=RAD["sm"],
                 command=_open_more,
-            ).pack(side="left")
+            ).pack(side="right")
+
+            # Apply hover bindings
+            bind_hover_recursive(card, card)
 
     def display_security_dashboard(self):
-        """Display comprehensive security dashboard"""
+        """Display comprehensive security dashboard with professional design"""
         report = self.vault.get_security_report()
 
-        # Stats cards
-        stats_row = ctk.CTkFrame(
-            self.items_container, fg_color="transparent", height=120
-        )
-        stats_row.pack(fill="x", padx=20, pady=(0, 20))
-        stats_row.pack_propagate(False)
+        # Stats cards row
+        stats_row = ctk.CTkFrame(self.items_container, fg_color="transparent")
+        stats_row.pack(fill="x", pady=(0, SP["lg"]))
 
-        # Card 1: Total
-        card1 = ctk.CTkFrame(stats_row, fg_color=COLORS["bg_card"], corner_radius=10)
-        card1.pack(side="left", fill="both", expand=True, padx=5)
-        ctk.CTkLabel(
-            card1,
-            text=str(report["total_passwords"]),
-            font=("Segoe UI", 36, "bold"),
-            text_color=COLORS["accent"],
-        ).pack(pady=(20, 2))
-        ctk.CTkLabel(
-            card1,
-            text="📊 Total",
-            font=("Segoe UI", 12),
-            text_color=COLORS["text_primary"],
-        ).pack(pady=(0, 20))
+        # Create 4 stat cards
+        stat_data = [
+            {
+                "value": str(report["total_passwords"]),
+                "label": "Total",
+                "icon": "📊",
+                "color": COLORS["accent"],
+            },
+            {
+                "value": str(len(report["weak_passwords"])),
+                "label": "Weak",
+                "icon": "⚠️",
+                "color": (
+                    COLORS["danger"]
+                    if len(report["weak_passwords"]) > 0
+                    else COLORS["success"]
+                ),
+            },
+            {
+                "value": str(len(report["reused_passwords"])),
+                "label": "Reused",
+                "icon": "🔄",
+                "color": (
+                    COLORS["danger"]
+                    if len(report["reused_passwords"]) > 0
+                    else COLORS["success"]
+                ),
+            },
+            {
+                "value": str(len(report["old_passwords"])),
+                "label": "Old (1yr+)",
+                "icon": "📅",
+                "color": (
+                    COLORS["warning"]
+                    if len(report["old_passwords"]) > 0
+                    else COLORS["success"]
+                ),
+            },
+        ]
 
-        # Card 2: Weak
-        card2 = ctk.CTkFrame(stats_row, fg_color=COLORS["bg_card"], corner_radius=10)
-        card2.pack(side="left", fill="both", expand=True, padx=5)
-        weak_count = len(report["weak_passwords"])
-        color = COLORS["danger"] if weak_count > 0 else COLORS["success"]
-        ctk.CTkLabel(
-            card2, text=str(weak_count), font=("Segoe UI", 36, "bold"), text_color=color
-        ).pack(pady=(20, 2))
-        ctk.CTkLabel(
-            card2,
-            text="⚠️ Weak",
-            font=("Segoe UI", 12),
-            text_color=COLORS["text_primary"],
-        ).pack(pady=(0, 20))
+        for stat in stat_data:
+            card = ctk.CTkFrame(
+                stats_row,
+                fg_color=COLORS["bg_card"],
+                corner_radius=RAD["md"],
+                border_width=1,
+                border_color=COLORS["border"],
+            )
+            card.pack(side="left", fill="both", expand=True, padx=SP["xs"])
 
-        # Card 3: Reused
-        card3 = ctk.CTkFrame(stats_row, fg_color=COLORS["bg_card"], corner_radius=10)
-        card3.pack(side="left", fill="both", expand=True, padx=5)
-        reused_count = len(report["reused_passwords"])
-        color = COLORS["danger"] if reused_count > 0 else COLORS["success"]
-        ctk.CTkLabel(
-            card3,
-            text=str(reused_count),
-            font=("Segoe UI", 36, "bold"),
-            text_color=color,
-        ).pack(pady=(20, 2))
-        ctk.CTkLabel(
-            card3,
-            text="🔄 Reused",
-            font=("Segoe UI", 12),
-            text_color=COLORS["text_primary"],
-        ).pack(pady=(0, 20))
+            ctk.CTkLabel(
+                card,
+                text=stat["value"],
+                font=("Segoe UI", 32, "bold"),
+                text_color=stat["color"],
+            ).pack(pady=(SP["lg"], SP["xs"]))
 
-        # Card 4: Old
-        card4 = ctk.CTkFrame(stats_row, fg_color=COLORS["bg_card"], corner_radius=10)
-        card4.pack(side="left", fill="both", expand=True, padx=5)
-        old_count = len(report["old_passwords"])
-        color = COLORS["warning"] if old_count > 0 else COLORS["success"]
-        ctk.CTkLabel(
-            card4, text=str(old_count), font=("Segoe UI", 36, "bold"), text_color=color
-        ).pack(pady=(20, 2))
-        ctk.CTkLabel(
-            card4,
-            text="📅 Old (1yr+)",
-            font=("Segoe UI", 12),
-            text_color=COLORS["text_primary"],
-        ).pack(pady=(0, 20))
+            ctk.CTkLabel(
+                card,
+                text=f"{stat['icon']} {stat['label']}",
+                font=FONT["body"],
+                text_color=COLORS["text_secondary"],
+            ).pack(pady=(0, SP["lg"]))
 
-        # Strength gauge
-        strength_frame = ctk.CTkFrame(
+        # Average strength card
+        strength_card = ctk.CTkFrame(
             self.items_container,
             fg_color=COLORS["bg_card"],
-            corner_radius=10,
-            height=100,
+            corner_radius=RAD["md"],
+            border_width=1,
+            border_color=COLORS["border"],
         )
-        strength_frame.pack(fill="x", padx=20, pady=(0, 20))
-        strength_frame.pack_propagate(False)
+        strength_card.pack(fill="x", pady=(0, SP["lg"]))
 
-        ctk.CTkLabel(
-            strength_frame,
-            text="💪 Average Strength",
-            font=("Segoe UI", 14, "bold"),
-            text_color=COLORS["text_primary"],
-        ).pack(pady=(15, 5))
+        strength_content = ctk.CTkFrame(strength_card, fg_color="transparent")
+        strength_content.pack(fill="x", padx=SP["lg"], pady=SP["md"])
 
         avg_strength = int(report["average_strength"])
         if avg_strength >= 80:
-            strength_text = "Excellent"
-            strength_color = COLORS["success"]
+            strength_text, strength_color = "Excellent", COLORS["success"]
         elif avg_strength >= 60:
-            strength_text = "Good"
-            strength_color = COLORS["accent"]
+            strength_text, strength_color = "Good", COLORS["accent"]
         elif avg_strength >= 40:
-            strength_text = "Fair"
-            strength_color = COLORS["warning"]
+            strength_text, strength_color = "Fair", COLORS["warning"]
         else:
-            strength_text = "Weak"
-            strength_color = COLORS["danger"]
+            strength_text, strength_color = "Weak", COLORS["danger"]
 
         ctk.CTkLabel(
-            strength_frame,
+            strength_content,
+            text="💪 Average Password Strength",
+            font=FONT["h3"],
+            text_color=COLORS["text_primary"],
+        ).pack(side="left")
+
+        ctk.CTkLabel(
+            strength_content,
             text=f"{avg_strength}% - {strength_text}",
-            font=("Segoe UI", 22, "bold"),
+            font=("Segoe UI", 18, "bold"),
             text_color=strength_color,
-        ).pack(pady=(0, 15))
+        ).pack(side="right")
 
-        # NON-SCROLLABLE CONTAINER FOR SECTIONS
+        # Content container for sections
         content_container = ctk.CTkFrame(self.items_container, fg_color="transparent")
-        content_container.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        content_container.pack(fill="both", expand=True)
 
-        # Weak passwords
+        weak_count = len(report["weak_passwords"])
+        reused_count = len(report["reused_passwords"])
+        old_count = len(report["old_passwords"])
+
+        # Weak passwords section
         if report["weak_passwords"]:
             weak_section = ctk.CTkFrame(
-                content_container, fg_color=COLORS["bg_card"], corner_radius=10
+                content_container,
+                fg_color=COLORS["bg_card"],
+                corner_radius=RAD["md"],
+                border_width=1,
+                border_color=COLORS["border"],
             )
-            weak_section.pack(fill="x", pady=(0, 12))
+            weak_section.pack(fill="x", pady=(0, SP["sm"]))
+
+            weak_header = ctk.CTkFrame(weak_section, fg_color="transparent")
+            weak_header.pack(fill="x", padx=SP["lg"], pady=SP["md"])
 
             ctk.CTkLabel(
-                weak_section,
-                text=f"⚠️ Weak Passwords ({len(report['weak_passwords'])})",
-                font=("Segoe UI", 15, "bold"),
+                weak_header,
+                text=f"⚠️ Weak Passwords ({weak_count})",
+                font=FONT["h3"],
                 text_color=COLORS["danger"],
-            ).pack(anchor="w", padx=15, pady=(12, 8))
+            ).pack(side="left")
 
             for pwd in report["weak_passwords"][:5]:
                 item_row = ctk.CTkFrame(
-                    weak_section, fg_color=COLORS["bg_secondary"], corner_radius=8
+                    weak_section,
+                    fg_color=COLORS["bg_hover"],
+                    corner_radius=RAD["sm"],
                 )
-                item_row.pack(fill="x", padx=15, pady=5, ipady=10, ipadx=12)
+                item_row.pack(fill="x", padx=SP["lg"], pady=(0, SP["xs"]))
+
+                item_content = ctk.CTkFrame(item_row, fg_color="transparent")
+                item_content.pack(fill="x", padx=SP["md"], pady=SP["sm"])
 
                 ctk.CTkLabel(
-                    item_row,
+                    item_content,
                     text=pwd["title"],
-                    font=("Segoe UI", 12, "bold"),
+                    font=FONT["body"],
                     text_color=COLORS["text_primary"],
-                ).pack(side="left", padx=8)
+                ).pack(side="left")
 
                 ctk.CTkLabel(
-                    item_row,
+                    item_content,
                     text=f"Strength: {pwd['score']}%",
-                    font=("Segoe UI", 11),
+                    font=FONT["small"],
                     text_color=COLORS["danger"],
-                ).pack(side="right", padx=8)
+                ).pack(side="right")
 
-            if len(report["weak_passwords"]) > 5:
+            if weak_count > 5:
                 ctk.CTkLabel(
                     weak_section,
-                    text=f"+ {len(report['weak_passwords']) - 5} more",
-                    font=("Segoe UI", 10),
-                    text_color=COLORS["text_secondary"],
-                ).pack(anchor="w", padx=15, pady=(5, 12))
+                    text=f"+ {weak_count - 5} more",
+                    font=FONT["small"],
+                    text_color=COLORS["text_muted"],
+                ).pack(anchor="w", padx=SP["lg"], pady=(SP["xs"], SP["md"]))
             else:
-                ctk.CTkFrame(weak_section, height=8, fg_color="transparent").pack()
+                ctk.CTkFrame(
+                    weak_section, height=SP["sm"], fg_color="transparent"
+                ).pack()
 
-        # Reused passwords
+        # Reused passwords section
         if report["reused_passwords"]:
             reused_section = ctk.CTkFrame(
-                content_container, fg_color=COLORS["bg_card"], corner_radius=10
+                content_container,
+                fg_color=COLORS["bg_card"],
+                corner_radius=RAD["md"],
+                border_width=1,
+                border_color=COLORS["border"],
             )
-            reused_section.pack(fill="x", pady=(0, 12))
+            reused_section.pack(fill="x", pady=(0, SP["sm"]))
+
+            reused_header = ctk.CTkFrame(reused_section, fg_color="transparent")
+            reused_header.pack(fill="x", padx=SP["lg"], pady=SP["md"])
 
             ctk.CTkLabel(
-                reused_section,
-                text=f"🔄 Reused Passwords ({len(report['reused_passwords'])})",
-                font=("Segoe UI", 15, "bold"),
+                reused_header,
+                text=f"🔄 Reused Passwords ({reused_count})",
+                font=FONT["h3"],
                 text_color=COLORS["warning"],
-            ).pack(anchor="w", padx=15, pady=(12, 8))
+            ).pack(side="left")
 
             for reused in report["reused_passwords"][:5]:
                 item_row = ctk.CTkFrame(
-                    reused_section, fg_color=COLORS["bg_secondary"], corner_radius=8
+                    reused_section,
+                    fg_color=COLORS["bg_hover"],
+                    corner_radius=RAD["sm"],
                 )
-                item_row.pack(fill="x", padx=15, pady=5, ipady=10, ipadx=12)
+                item_row.pack(fill="x", padx=SP["lg"], pady=(0, SP["xs"]))
+
+                item_content = ctk.CTkFrame(item_row, fg_color="transparent")
+                item_content.pack(fill="x", padx=SP["md"], pady=SP["sm"])
 
                 used_in_text = ", ".join(reused["used_in"][:3])
                 if len(reused["used_in"]) > 3:
                     used_in_text += f" +{len(reused['used_in']) - 3} more"
 
                 ctk.CTkLabel(
-                    item_row,
+                    item_content,
                     text=f"Used in: {used_in_text}",
-                    font=("Segoe UI", 11),
+                    font=FONT["body"],
                     text_color=COLORS["text_primary"],
-                ).pack(side="left", padx=8)
+                ).pack(side="left")
 
-            if len(report["reused_passwords"]) > 5:
+            if reused_count > 5:
                 ctk.CTkLabel(
                     reused_section,
-                    text=f"+ {len(report['reused_passwords']) - 5} more",
-                    font=("Segoe UI", 10),
-                    text_color=COLORS["text_secondary"],
-                ).pack(anchor="w", padx=15, pady=(5, 12))
+                    text=f"+ {reused_count - 5} more",
+                    font=FONT["small"],
+                    text_color=COLORS["text_muted"],
+                ).pack(anchor="w", padx=SP["lg"], pady=(SP["xs"], SP["md"]))
             else:
-                ctk.CTkFrame(reused_section, height=8, fg_color="transparent").pack()
+                ctk.CTkFrame(
+                    reused_section, height=SP["sm"], fg_color="transparent"
+                ).pack()
 
-        # Old passwords
+        # Old passwords section
         if report["old_passwords"]:
             old_section = ctk.CTkFrame(
-                content_container, fg_color=COLORS["bg_card"], corner_radius=10
+                content_container,
+                fg_color=COLORS["bg_card"],
+                corner_radius=RAD["md"],
+                border_width=1,
+                border_color=COLORS["border"],
             )
-            old_section.pack(fill="x", pady=(0, 12))
+            old_section.pack(fill="x", pady=(0, SP["sm"]))
+
+            old_header = ctk.CTkFrame(old_section, fg_color="transparent")
+            old_header.pack(fill="x", padx=SP["lg"], pady=SP["md"])
 
             ctk.CTkLabel(
-                old_section,
-                text=f"📅 Old Passwords ({len(report['old_passwords'])})",
-                font=("Segoe UI", 15, "bold"),
+                old_header,
+                text=f"📅 Old Passwords ({old_count})",
+                font=FONT["h3"],
                 text_color=COLORS["warning"],
-            ).pack(anchor="w", padx=15, pady=(12, 8))
+            ).pack(side="left")
 
             for old in report["old_passwords"][:5]:
                 item_row = ctk.CTkFrame(
-                    old_section, fg_color=COLORS["bg_secondary"], corner_radius=8
+                    old_section,
+                    fg_color=COLORS["bg_hover"],
+                    corner_radius=RAD["sm"],
                 )
-                item_row.pack(fill="x", padx=15, pady=5, ipady=10, ipadx=12)
+                item_row.pack(fill="x", padx=SP["lg"], pady=(0, SP["xs"]))
+
+                item_content = ctk.CTkFrame(item_row, fg_color="transparent")
+                item_content.pack(fill="x", padx=SP["md"], pady=SP["sm"])
 
                 ctk.CTkLabel(
-                    item_row,
+                    item_content,
                     text=old["title"],
-                    font=("Segoe UI", 12, "bold"),
+                    font=FONT["body"],
                     text_color=COLORS["text_primary"],
-                ).pack(side="left", padx=8)
+                ).pack(side="left")
 
                 ctk.CTkLabel(
-                    item_row,
+                    item_content,
                     text=f"{old['age_days']} days old",
-                    font=("Segoe UI", 11),
+                    font=FONT["small"],
                     text_color=COLORS["warning"],
-                ).pack(side="right", padx=8)
+                ).pack(side="right")
 
-            if len(report["old_passwords"]) > 5:
+            if old_count > 5:
                 ctk.CTkLabel(
                     old_section,
-                    text=f"+ {len(report['old_passwords']) - 5} more",
-                    font=("Segoe UI", 10),
-                    text_color=COLORS["text_secondary"],
-                ).pack(anchor="w", padx=15, pady=(5, 12))
+                    text=f"+ {old_count - 5} more",
+                    font=FONT["small"],
+                    text_color=COLORS["text_muted"],
+                ).pack(anchor="w", padx=SP["lg"], pady=(SP["xs"], SP["md"]))
             else:
-                ctk.CTkFrame(old_section, height=8, fg_color="transparent").pack()
+                ctk.CTkFrame(
+                    old_section, height=SP["sm"], fg_color="transparent"
+                ).pack()
 
-        # RECOMMENDATIONS - NOW FULLY VISIBLE
+        # Security Recommendations
         rec_section = ctk.CTkFrame(
-            content_container, fg_color=COLORS["bg_card"], corner_radius=10
+            content_container,
+            fg_color=COLORS["bg_card"],
+            corner_radius=RAD["md"],
+            border_width=1,
+            border_color=COLORS["border"],
         )
-        rec_section.pack(fill="x", pady=(0, 30))
+        rec_section.pack(fill="x", pady=(SP["md"], SP["lg"]))
+
+        rec_header = ctk.CTkFrame(rec_section, fg_color="transparent")
+        rec_header.pack(fill="x", padx=SP["lg"], pady=SP["md"])
 
         ctk.CTkLabel(
-            rec_section,
+            rec_header,
             text="💡 Security Recommendations",
-            font=("Segoe UI", 16, "bold"),
+            font=FONT["h3"],
             text_color=COLORS["accent"],
-        ).pack(anchor="w", padx=20, pady=(20, 15))
+        ).pack(side="left")
 
         tips = []
         if weak_count > 0:
             tips.append(
-                f"• Update {weak_count} weak password(s) with stronger alternatives"
+                (
+                    "⚠️",
+                    f"Update {weak_count} weak password(s) with stronger alternatives",
+                    COLORS["danger"],
+                )
             )
         if reused_count > 0:
-            tips.append(f"• Change {reused_count} reused password(s) to unique ones")
+            tips.append(
+                (
+                    "🔄",
+                    f"Change {reused_count} reused password(s) to unique ones",
+                    COLORS["warning"],
+                )
+            )
         if old_count > 0:
-            tips.append(f"• Refresh {old_count} password(s) older than 1 year")
+            tips.append(
+                (
+                    "📅",
+                    f"Refresh {old_count} password(s) older than 1 year",
+                    COLORS["warning"],
+                )
+            )
         if not tips:
-            tips.append("✅ Your password security is excellent! Keep it up.")
+            tips.append(
+                (
+                    "✅",
+                    "Your password security is excellent! Keep it up.",
+                    COLORS["success"],
+                )
+            )
 
-        for tip in tips:
-            ctk.CTkLabel(
+        for icon, tip, color in tips:
+            tip_row = ctk.CTkFrame(
                 rec_section,
-                text=tip,
-                font=("Segoe UI", 13),
-                text_color=COLORS["text_primary"],
-                anchor="w",
-                justify="left",
-            ).pack(anchor="w", fill="x", padx=20, pady=(0, 12))
+                fg_color=COLORS["bg_hover"],
+                corner_radius=RAD["sm"],
+            )
+            tip_row.pack(fill="x", padx=SP["lg"], pady=(0, SP["xs"]))
 
-        ctk.CTkFrame(rec_section, height=10, fg_color="transparent").pack()
+            tip_content = ctk.CTkFrame(tip_row, fg_color="transparent")
+            tip_content.pack(fill="x", padx=SP["md"], pady=SP["sm"])
+
+            ctk.CTkLabel(
+                tip_content,
+                text=f"{icon}  {tip}",
+                font=FONT["body"],
+                text_color=color,
+            ).pack(side="left")
+
+        ctk.CTkFrame(rec_section, height=SP["sm"], fg_color="transparent").pack()
 
     def scan_all_passwords_for_breaches(self):
         """Scan all passwords for breaches"""
@@ -2145,26 +2462,39 @@ class LockBoxUI(LoginViewMixin):
         ctk.CTkButton(dlg, text="Close", command=dlg.destroy).pack(pady=20)
 
     def display_bulk_delete(self):
-        """Display bulk delete manager - FIXED"""
+        """Display bulk delete manager with professional design"""
         for widget in self.items_container.winfo_children():
             widget.destroy()
         if not hasattr(self, "bulk_selected"):
             self.bulk_selected = []
         if not hasattr(self, "bulk_category_filter"):
             self.bulk_category_filter = "All Items"
+
+        # Fixed header with filter controls
         fixed_header = ctk.CTkFrame(self.items_container, fg_color="transparent")
-        fixed_header.pack(fill="x", padx=20, pady=(20, 10))
+        fixed_header.pack(fill="x", pady=(0, SP["md"]))
+
+        # Control bar with filters and delete button
         control_bar = ctk.CTkFrame(
-            fixed_header, fg_color=COLORS["bg_card"], corner_radius=12, height=70
+            fixed_header,
+            fg_color=COLORS["bg_card"],
+            corner_radius=RAD["md"],
+            border_width=1,
+            border_color=COLORS["border"],
         )
-        control_bar.pack(fill="x", pady=(0, 15))
-        control_bar.pack_propagate(False)
+        control_bar.pack(fill="x", pady=(0, SP["sm"]))
+
+        control_content = ctk.CTkFrame(control_bar, fg_color="transparent")
+        control_content.pack(fill="x", padx=SP["lg"], pady=SP["md"])
+
+        # Filter label
         ctk.CTkLabel(
-            control_bar,
+            control_content,
             text="Filter:",
-            font=("Segoe UI", 12, "bold"),
+            font=FONT["body"],
             text_color=COLORS["text_secondary"],
-        ).pack(side="left", padx=(20, 10))
+        ).pack(side="left", padx=(0, SP["sm"]))
+
         self.filter_options = [
             "All Items",
             "Passwords",
@@ -2189,9 +2519,7 @@ class LockBoxUI(LoginViewMixin):
                         if is_active
                         else COLORS["text_secondary"]
                     ),
-                    border_color=(
-                        COLORS["accent"] if is_active else COLORS["bg_secondary"]
-                    ),
+                    border_color=(COLORS["accent"] if is_active else COLORS["border"]),
                 )
             if hasattr(self, "_bulk_scroll_frame"):
                 for widget in self._bulk_scroll_frame.winfo_children():
@@ -2201,22 +2529,22 @@ class LockBoxUI(LoginViewMixin):
         for label in self.filter_options:
             is_current = label == self.bulk_category_filter
             btn = ctk.CTkButton(
-                control_bar,
+                control_content,
                 text=label,
-                width=88,
-                height=34,
-                font=("Segoe UI", 11),
+                width=80,
+                height=CTL["h"] - 8,
+                font=FONT["small"],
                 fg_color=COLORS["accent"] if is_current else "transparent",
                 hover_color=COLORS["accent_hover"],
                 text_color=(
                     COLORS["text_primary"] if is_current else COLORS["text_secondary"]
                 ),
-                corner_radius=17,
+                corner_radius=RAD["lg"],
                 border_width=1,
-                border_color=COLORS["accent"] if is_current else COLORS["bg_secondary"],
+                border_color=COLORS["accent"] if is_current else COLORS["border"],
                 command=lambda c=label: switch_filter(c),
             )
-            btn.pack(side="left", padx=3)
+            btn.pack(side="left", padx=SP["xs"] // 2)
             self.category_pill_buttons[label] = btn
 
         def delete_selected():
@@ -2256,33 +2584,64 @@ class LockBoxUI(LoginViewMixin):
                 self.reload_bulk_items_content()
 
         ctk.CTkButton(
-            control_bar,
+            control_content,
             text="🗑️ Delete Selected",
-            width=180,
-            height=45,
-            font=("Segoe UI", 14, "bold"),
+            width=160,
+            height=CTL["h"] - 4,
+            font=FONT["button"],
             fg_color=COLORS["danger"],
-            hover_color="#c0392b",
-            corner_radius=10,
+            hover_color="#dc2626",
+            corner_radius=RAD["md"],
             command=delete_selected,
-        ).pack(side="right", padx=20)
+        ).pack(side="right")
+
+        # Select all bar
         select_all_frame = ctk.CTkFrame(
-            fixed_header, fg_color=COLORS["bg_card"], corner_radius=10
+            fixed_header,
+            fg_color=COLORS["bg_card"],
+            corner_radius=RAD["md"],
+            border_width=1,
+            border_color=COLORS["border"],
         )
-        select_all_frame.pack(fill="x", pady=(0, 10), ipady=12, ipadx=15)
+        select_all_frame.pack(fill="x", pady=(0, SP["sm"]))
         self._select_all_frame = select_all_frame
+
+        # Scrollable items container
         self._bulk_scroll_frame = ctk.CTkScrollableFrame(
             self.items_container, fg_color="transparent"
         )
-        self._bulk_scroll_frame.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        self._bulk_scroll_frame.pack(fill="both", expand=True)
         self.reload_bulk_items_content()
 
     def reload_bulk_items_content(self):
-        """Reload items in bulk delete view"""
+        """Reload items in bulk delete view with professional design"""
         for widget in self._bulk_scroll_frame.winfo_children():
             widget.destroy()
         for widget in self._select_all_frame.winfo_children():
             widget.destroy()
+
+        # Define hover effect function
+        def bind_hover_recursive(widget, default_color, hover_color):
+            """Bind hover effect to widget and all its children"""
+
+            def on_enter(e):
+                try:
+                    widget.configure(border_color=hover_color)
+                except:
+                    pass
+
+            def on_leave(e):
+                try:
+                    widget.configure(border_color=default_color)
+                except:
+                    pass
+
+            widget.bind("<Enter>", on_enter, add="+")
+            widget.bind("<Leave>", on_leave, add="+")
+            for child in widget.winfo_children():
+                child.bind("<Enter>", on_enter, add="+")
+                child.bind("<Leave>", on_leave, add="+")
+
         all_items = []
         filter_choice = self.bulk_category_filter
         if filter_choice in ["All Items", "Passwords"]:
@@ -2352,14 +2711,25 @@ class LockBoxUI(LoginViewMixin):
                     }
                 )
         all_items.sort(key=lambda x: x["item"].get("created", ""), reverse=True)
+
         if not all_items:
-            ctk.CTkLabel(
+            empty_frame = ctk.CTkFrame(
                 self._bulk_scroll_frame,
+                fg_color=COLORS["bg_card"],
+                corner_radius=RAD["md"],
+                border_width=1,
+                border_color=COLORS["border"],
+            )
+            empty_frame.pack(fill="x", pady=SP["xl"])
+
+            ctk.CTkLabel(
+                empty_frame,
                 text=f"No {filter_choice.lower()} found",
-                font=("Segoe UI", 16),
+                font=FONT["h3"],
                 text_color=COLORS["text_secondary"],
-            ).pack(pady=80)
+            ).pack(pady=SP["2xl"])
             return
+
         select_all_var = tk.BooleanVar(value=False)
         select_all_checkbox = None
 
@@ -2388,26 +2758,40 @@ class LockBoxUI(LoginViewMixin):
             except:
                 pass
 
+        select_all_content = ctk.CTkFrame(
+            self._select_all_frame, fg_color="transparent"
+        )
+        select_all_content.pack(fill="x", padx=SP["lg"], pady=SP["sm"])
+
         select_all_checkbox = ctk.CTkCheckBox(
-            self._select_all_frame,
+            select_all_content,
             text=f"Select All ({len(all_items)} items)",
             variable=select_all_var,
-            font=("Segoe UI", 13, "bold"),
+            font=FONT["body"],
             command=toggle_all,
-            checkbox_width=24,
-            checkbox_height=24,
+            checkbox_width=22,
+            checkbox_height=22,
         )
-        select_all_checkbox.pack(side="left", padx=15)
+        select_all_checkbox.pack(side="left")
+
         for meta in all_items:
             item = meta["item"]
             cat = meta["category"]
-            card = ctk.CTkFrame(
-                self._bulk_scroll_frame, fg_color=COLORS["bg_card"], corner_radius=12
-            )
-            card.pack(fill="both", expand=True, pady=10, ipady=15, ipadx=20)
-            top = ctk.CTkFrame(card, fg_color="transparent")
-            top.pack(fill="x", pady=(0, 5), padx=5)
 
+            # Professional card with border
+            card = ctk.CTkFrame(
+                self._bulk_scroll_frame,
+                fg_color=COLORS["bg_card"],
+                corner_radius=RAD["md"],
+                border_width=1,
+                border_color=COLORS["border"],
+            )
+            card.pack(fill="x", pady=(0, SP["sm"]))
+
+            card_content = ctk.CTkFrame(card, fg_color="transparent")
+            card_content.pack(fill="x", padx=SP["lg"], pady=SP["md"])
+
+            # Checkbox column
             def on_check(cid=meta["id"], var=meta["var"]):
                 if var.get():
                     if cid not in self.bulk_selected:
@@ -2418,23 +2802,28 @@ class LockBoxUI(LoginViewMixin):
                 update_selection_count()
 
             ctk.CTkCheckBox(
-                top,
+                card_content,
                 text="",
                 variable=meta["var"],
                 command=on_check,
-                checkbox_width=24,
-                checkbox_height=24,
-            ).pack(side="left", padx=(5, 10))
+                checkbox_width=22,
+                checkbox_height=22,
+                width=22,
+            ).pack(side="left", padx=(0, SP["md"]))
+
+            # Category badge
             ctk.CTkLabel(
-                top,
+                card_content,
                 text=meta["label"],
-                font=("Segoe UI", 11, "bold"),
+                font=FONT["small"],
                 text_color="white",
                 fg_color=COLORS["accent"],
-                corner_radius=6,
-                padx=12,
-                pady=5,
-            ).pack(side="left", padx=(0, 10))
+                corner_radius=RAD["sm"],
+                padx=SP["sm"],
+                pady=SP["xs"],
+            ).pack(side="left", padx=(0, SP["md"]))
+
+            # Title
             name = (
                 item.get("title")
                 or item.get("service")
@@ -2444,41 +2833,56 @@ class LockBoxUI(LoginViewMixin):
                 or "Untitled"
             )
             ctk.CTkLabel(
-                top,
+                card_content,
                 text=name,
-                font=("Segoe UI", 16, "bold"),
+                font=(
+                    "Segoe UI",
+                    FONT["body"].cget("size") if hasattr(FONT["body"], "cget") else 14,
+                    "bold",
+                ),
                 text_color=COLORS["text_primary"],
             ).pack(side="left")
-            info = ctk.CTkFrame(card, fg_color="transparent")
-            info.pack(fill="x", padx=5)
+
+            # Metadata on the right
             if cat == "passwords":
                 ctk.CTkLabel(
-                    info,
+                    card_content,
                     text=f"👤 {item.get('username', 'N/A')}",
-                    font=("Segoe UI", 12),
+                    font=FONT["small"],
                     text_color=COLORS["text_secondary"],
-                ).pack(side="left", padx=(5, 20))
+                ).pack(side="right", padx=SP["sm"])
             elif cat == "files":
+                size_kb = item.get("size", 0) / 1024
                 ctk.CTkLabel(
-                    info,
-                    text=f"💾 {item.get('size', 0) / 1024:.1f} KB",
-                    font=("Segoe UI", 12),
+                    card_content,
+                    text=f"💾 {size_kb:.1f} KB",
+                    font=FONT["small"],
                     text_color=COLORS["text_secondary"],
-                ).pack(side="left", padx=(5, 20))
+                ).pack(side="right", padx=SP["sm"])
+            elif cat == "api_keys":
+                ctk.CTkLabel(
+                    card_content,
+                    text=f"📝 {item.get('service', 'N/A')}",
+                    font=FONT["small"],
+                    text_color=COLORS["text_secondary"],
+                ).pack(side="right", padx=SP["sm"])
+            elif cat == "ssh_keys":
+                ctk.CTkLabel(
+                    card_content,
+                    text=f"🔑 {item.get('name', 'N/A')}",
+                    font=FONT["small"],
+                    text_color=COLORS["text_secondary"],
+                ).pack(side="right", padx=SP["sm"])
             elif cat == "encrypted_folders":
                 ctk.CTkLabel(
-                    info,
+                    card_content,
                     text=f"📊 {item.get('file_count', 0)} files",
-                    font=("Segoe UI", 12),
+                    font=FONT["small"],
                     text_color=COLORS["text_secondary"],
-                ).pack(side="left", padx=(0, 20))
-            created = item.get("created", "Unknown")[:10]
-            ctk.CTkLabel(
-                info,
-                text=f"📅 Created: {created}",
-                font=("Segoe UI", 11),
-                text_color=COLORS["text_secondary"],
-            ).pack(side="left")
+                ).pack(side="right", padx=SP["sm"])
+
+            # Add hover effect
+            bind_hover_recursive(card, COLORS["border"], COLORS["accent"])
 
     def show_add_dialog(self):
         """Show add dialog based on category"""
@@ -4169,7 +4573,7 @@ Try again later.
         ).pack(pady=(15, 25))
 
     def display_totp_items(self, items):
-        """Display TOTP/2FA codes with live countdown"""
+        """Display TOTP/2FA codes with live countdown and professional card design"""
         import pyotp
 
         # Always rebuild from scratch (simpler and more reliable)
@@ -4185,41 +4589,64 @@ Try again later.
             ).pack(pady=100)
             return
 
+        # Hover effect helper
+        def bind_hover_recursive(widget, card_ref):
+            widget.bind(
+                "<Enter>",
+                lambda e, c=card_ref: c.configure(border_color=COLORS["accent"]),
+            )
+            widget.bind(
+                "<Leave>",
+                lambda e, c=card_ref: c.configure(border_color=COLORS["border"]),
+            )
+            for child in widget.winfo_children():
+                bind_hover_recursive(child, card_ref)
+
         # Store references for updates
         self._totp_labels = {}
 
         for item in items:
             card = ctk.CTkFrame(
-                self.items_container, fg_color=COLORS["bg_card"], corner_radius=12
+                self.items_container,
+                fg_color=COLORS["bg_card"],
+                corner_radius=RAD["md"],
+                border_width=1,
+                border_color=COLORS["border"],
             )
-            card.pack(fill="x", pady=10, padx=10, ipady=15, ipadx=15)
+            card.pack(fill="x", pady=3, padx=0)
 
-            # Header
-            header_row = ctk.CTkFrame(card, fg_color="transparent")
-            header_row.pack(fill="x", pady=(0, 5), padx=5)
+            content = ctk.CTkFrame(card, fg_color="transparent")
+            content.pack(fill="x", padx=SP["lg"], pady=SP["sm"])
+
+            # Header: 2FA icon + Name + Issuer
+            header = ctk.CTkFrame(content, fg_color="transparent")
+            header.pack(fill="x")
 
             ctk.CTkLabel(
-                header_row,
+                header,
+                text="🔐",
+                font=FONT["body"],
+                text_color=COLORS["text_muted"],
+            ).pack(side="left", padx=(0, SP["xs"]))
+
+            ctk.CTkLabel(
+                header,
                 text=item.get("name", "Untitled"),
-                font=("Segoe UI", 16, "bold"),
-            ).pack(side="left", anchor="w")
+                font=FONT["h3"],
+                text_color=COLORS["text_primary"],
+            ).pack(side="left")
 
             if item.get("issuer"):
                 ctk.CTkLabel(
-                    header_row,
-                    text=f"({item['issuer']})",
-                    font=("Segoe UI", 12),
-                    text_color=COLORS["text_secondary"],
-                ).pack(side="left", padx=(10, 0))
+                    header,
+                    text=f"• {item['issuer']}",
+                    font=FONT["small"],
+                    text_color=COLORS["text_muted"],
+                ).pack(side="left", padx=(SP["sm"], 0))
 
-            # Code display
-            code_frame = ctk.CTkFrame(
-                card, fg_color=COLORS["bg_secondary"], corner_radius=10
-            )
-            code_frame.pack(fill="x", pady=(10, 10), padx=5, ipady=12)
-
-            code_row = ctk.CTkFrame(code_frame, fg_color="transparent")
-            code_row.pack(fill="x", padx=15)
+            # Code display row
+            code_row = ctk.CTkFrame(content, fg_color="transparent")
+            code_row.pack(fill="x", pady=(SP["sm"], 0))
 
             # Generate initial code
             try:
@@ -4234,7 +4661,7 @@ Try again later.
             code_label = ctk.CTkLabel(
                 code_row,
                 text=formatted_code,
-                font=("Consolas", 32, "bold"),
+                font=("Consolas", 28, "bold"),
                 text_color=COLORS["accent"],
             )
             code_label.pack(side="left")
@@ -4242,11 +4669,11 @@ Try again later.
             timer_color = COLORS["danger"] if remaining <= 5 else COLORS["success"]
             timer_label = ctk.CTkLabel(
                 code_row,
-                text=f"⏱️ {remaining}s",
-                font=("Segoe UI", 14, "bold"),
+                text=f"⏱ {remaining}s",
+                font=FONT["body"],
                 text_color=timer_color,
             )
-            timer_label.pack(side="right")
+            timer_label.pack(side="left", padx=(SP["md"], 0))
 
             # Store for updates
             self._totp_labels[item["id"]] = {
@@ -4255,47 +4682,58 @@ Try again later.
                 "timer_label": timer_label,
             }
 
-            # Date info
-            date_row = ctk.CTkFrame(card, fg_color="transparent")
-            date_row.pack(fill="x", pady=(5, 10), padx=5)
+            # Actions row
+            actions = ctk.CTkFrame(content, fg_color="transparent")
+            actions.pack(fill="x", pady=(SP["sm"], 0))
 
-            created = item.get("created", "Unknown")
-            if created != "Unknown" and len(created) > 10:
-                created = created[:10]
-
-            ctk.CTkLabel(
-                date_row,
-                text=f"📅 Created: {created}",
-                font=("Segoe UI", 11),
-                text_color=COLORS["text_secondary"],
-            ).pack(side="left", padx=(5, 0))
-
-            # Actions
-            actions = ctk.CTkFrame(card, fg_color="transparent")
-            actions.pack(fill="x", pady=(10, 0), padx=5)
-
-            copy_btn = ctk.CTkButton(
-                actions,
-                text="📋 Copy Code",
-                width=120,
-                height=32,
-                fg_color=COLORS["accent"],
-                hover_color=COLORS["accent_hover"],
-                corner_radius=6,
-                command=lambda s=item["secret"]: self._copy_current_totp(s),
-            )
-            copy_btn.pack(side="left", padx=(5, 8))
+            # Left actions
+            left_actions = ctk.CTkFrame(actions, fg_color="transparent")
+            left_actions.pack(side="left")
 
             ctk.CTkButton(
-                actions,
-                text="🗑️ Delete",
+                left_actions,
+                text="Copy Code",
                 width=90,
                 height=32,
-                fg_color=COLORS["danger"],
-                hover_color="#c0392b",
-                corner_radius=6,
-                command=lambda i=item["id"]: self.delete_totp(i),
-            ).pack(side="right", padx=(0, 5))
+                font=FONT["button"],
+                fg_color=COLORS["accent"],
+                hover_color=COLORS["accent_hover"],
+                corner_radius=RAD["sm"],
+                command=lambda s=item["secret"]: self._copy_current_totp(s),
+            ).pack(side="left")
+
+            # Right actions (more menu)
+            right_actions = ctk.CTkFrame(actions, fg_color="transparent")
+            right_actions.pack(side="right")
+
+            def _open_more(event=None, i=item):
+                menu = tk.Menu(self.app, tearoff=0, font=FONT["body"])
+                menu.add_command(
+                    label="Delete...",
+                    foreground="#ef4444",
+                    command=lambda: self.confirm_delete_item(
+                        i["id"], "totp", i.get("name", "this code")
+                    ),
+                )
+                menu.tk_popup(self.app.winfo_pointerx(), self.app.winfo_pointery())
+
+            ctk.CTkButton(
+                right_actions,
+                text="•••",
+                width=40,
+                height=32,
+                font=("Segoe UI", 16),
+                fg_color="transparent",
+                hover_color=COLORS["bg_hover"],
+                text_color=COLORS["text_muted"],
+                border_width=1,
+                border_color=COLORS["border"],
+                corner_radius=RAD["sm"],
+                command=_open_more,
+            ).pack(side="right")
+
+            # Apply hover bindings
+            bind_hover_recursive(card, card)
 
         # Start auto-refresh (updates every second)
         self._schedule_totp_refresh()

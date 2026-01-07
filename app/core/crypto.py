@@ -79,50 +79,81 @@ def check_password_strength(password: str) -> dict:
     has_digit = any(c.isdigit() for c in password)
     has_symbol = any(not c.isalnum() for c in password)
 
+    # Length is the most important factor - strict requirements
     if length >= 16:
-        score += 40
+        score += 35
     elif length >= 12:
-        score += 30
+        score += 25
     elif length >= 8:
-        score += 20
-    else:
-        score += 10
+        score += 15
+    elif length >= 6:
+        score += 5
         feedback.append("Password too short (min 8 chars)")
-
-    if has_lower:
-        score += 15
     else:
-        feedback.append("Add lowercase letters")
+        # Very short passwords get 0 score for length
+        score += 0
+        feedback.append("Password way too short (min 8 chars)")
 
-    if has_upper:
-        score += 15
+    # Character variety bonuses only apply if length >= 8
+    if length >= 8:
+        if has_lower:
+            score += 15
+        else:
+            feedback.append("Add lowercase letters")
+
+        if has_upper:
+            score += 15
+        else:
+            feedback.append("Add uppercase letters")
+
+        if has_digit:
+            score += 15
+        else:
+            feedback.append("Add numbers")
+
+        if has_symbol:
+            score += 20
+        else:
+            feedback.append("Add symbols (!@#$...)")
     else:
-        feedback.append("Add uppercase letters")
+        # Short passwords don't get character bonuses
+        if not has_lower:
+            feedback.append("Add lowercase letters")
+        if not has_upper:
+            feedback.append("Add uppercase letters")
+        if not has_digit:
+            feedback.append("Add numbers")
+        if not has_symbol:
+            feedback.append("Add symbols (!@#$...)")
 
-    if has_digit:
-        score += 15
-    else:
-        feedback.append("Add numbers")
+    # Cap score at 100
+    score = min(score, 100)
 
-    if has_symbol:
-        score += 15
-    else:
-        feedback.append("Add symbols (!@#$...)")
-
+    # Determine strength label - stricter thresholds
     if score >= 80:
         strength = "Strong"
         color = "#2ecc71"
+        score_normalized = 4
     elif score >= 60:
         strength = "Good"
         color = "#f39c12"
+        score_normalized = 3
     elif score >= 40:
         strength = "Fair"
         color = "#e67e22"
+        score_normalized = 2
     else:
         strength = "Weak"
         color = "#e74c3c"
+        score_normalized = 1
 
-    return {"score": score, "strength": strength, "color": color, "feedback": feedback}
+    return {
+        "score": score_normalized,
+        "strength": strength,
+        "color": color,
+        "feedback": feedback,
+        "percent": score,
+    }
 
 
 def hash_for_verification(data: str) -> str:

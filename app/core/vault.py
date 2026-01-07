@@ -444,9 +444,14 @@ class Vault:
             title = pwd_entry.get("title", "Unknown")
 
             strength = check_password_strength(pwd)
-            if strength["score"] < 60:
+            # Use normalized score (1-4) for weak check, percent for display
+            if strength["score"] < 3:
                 weak_passwords.append(
-                    {"id": pwd_id, "title": title, "score": strength["score"]}
+                    {
+                        "id": pwd_id,
+                        "title": title,
+                        "score": strength.get("percent", strength["score"]),
+                    }
                 )
 
             if pwd in password_map:
@@ -477,7 +482,7 @@ class Vault:
             "average_strength": (
                 sum(
                     [
-                        check_password_strength(p.get("password", ""))["score"]
+                        check_password_strength(p.get("password", "")).get("percent", 0)
                         for p in passwords
                     ]
                 )

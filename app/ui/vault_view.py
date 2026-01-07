@@ -845,8 +845,8 @@ class LockBoxUI(LoginViewMixin):
             # Sort button that shows current selection with arrow
             self.sort_btn = ctk.CTkButton(
                 actions,
-                text="Newest  ▾",
-                width=110,
+                text="Newest ▼",
+                width=100,
                 height=CTL["h"],
                 font=FONT["body"],
                 fg_color=COLORS["bg_card"],
@@ -856,6 +856,7 @@ class LockBoxUI(LoginViewMixin):
                 command=self._toggle_sort_dropdown,
             )
             self.sort_btn.pack(side="left", padx=(0, SP["sm"]))
+            self.sort_btn.pack_propagate(False)
 
             # Dropdown popup (hidden by default)
             self.sort_dropdown_open = False
@@ -1012,7 +1013,7 @@ class LockBoxUI(LoginViewMixin):
         self.sort_by = sort_map.get(choice, "created_desc")
         # Update button text with arrow
         if hasattr(self, "sort_btn"):
-            self.sort_btn.configure(text=f"{choice}  ▾")
+            self.sort_btn.configure(text=f"{choice} ▼")
         # Defer refresh to avoid layout glitch
         self.app.after(10, self.display_items)
 
@@ -1030,8 +1031,10 @@ class LockBoxUI(LoginViewMixin):
 
         self.sort_dropdown_open = True
         # Update button text to show arrow pointing up
-        current_text = self.sort_btn.cget("text").replace(" ▾", "").replace(" ▴", "")
-        self.sort_btn.configure(text=f"{current_text}  ▴")
+        current_text = (
+            self.sort_btn.cget("text").replace(" ▼", "").replace(" ▲", "").strip()
+        )
+        self.sort_btn.configure(text=f"{current_text} ▲")
 
         # Create popup window
         self.sort_popup = ctk.CTkToplevel(self.app)
@@ -1108,9 +1111,9 @@ class LockBoxUI(LoginViewMixin):
         if hasattr(self, "sort_btn"):
             # Update button text to show arrow pointing down
             current_text = (
-                self.sort_btn.cget("text").replace(" ▾", "").replace(" ▴", "")
+                self.sort_btn.cget("text").replace(" ▼", "").replace(" ▲", "").strip()
             )
-            self.sort_btn.configure(text=f"{current_text}  ▾")
+            self.sort_btn.configure(text=f"{current_text} ▼")
         if self.sort_popup is not None:
             try:
                 self.sort_popup.destroy()
@@ -2671,13 +2674,13 @@ class LockBoxUI(LoginViewMixin):
 
         avg_strength = int(report["average_strength"])
         if avg_strength >= 80:
-            strength_text, strength_color = "Excellent", COLORS["success"]
+            strength_text, strength_color = "Strong", COLORS["success"]
         elif avg_strength >= 60:
-            strength_text, strength_color = "Good", COLORS["accent"]
+            strength_text, strength_color = "Fair", COLORS["accent"]
         elif avg_strength >= 40:
-            strength_text, strength_color = "Fair", COLORS["warning"]
+            strength_text, strength_color = "Weak", COLORS["warning"]
         else:
-            strength_text, strength_color = "Weak", COLORS["danger"]
+            strength_text, strength_color = "Very Weak", COLORS["danger"]
 
         ctk.CTkLabel(
             strength_content,
@@ -2688,7 +2691,7 @@ class LockBoxUI(LoginViewMixin):
 
         ctk.CTkLabel(
             strength_content,
-            text=f"{avg_strength}% - {strength_text}",
+            text=strength_text,
             font=("Segoe UI", 18, "bold"),
             text_color=strength_color,
         ).pack(side="right")
@@ -2745,38 +2748,52 @@ class LockBoxUI(LoginViewMixin):
                 weak_header,
                 text=f"⚠️ Weak Passwords ({weak_count})",
                 font=FONT["h3"],
-                text_color=COLORS["danger"],
+                text_color=COLORS["text_secondary"],
             ).pack(side="left")
 
+            # Fix Weak Passwords button
+            ctk.CTkButton(
+                weak_header,
+                text="Fix Weak Passwords",
+                width=140,
+                height=32,
+                font=FONT["button"],
+                fg_color=COLORS["accent"],
+                hover_color=COLORS["accent_hover"],
+                corner_radius=RAD["sm"],
+                command=lambda: self._fix_weak_passwords_flow(report["weak_passwords"]),
+            ).pack(side="right")
+
+            # Get strength label for score
+            def get_strength_label(score):
+                if score >= 80:
+                    return "Strong"
+                elif score >= 60:
+                    return "Fair"
+                elif score >= 40:
+                    return "Weak"
+                else:
+                    return "Very Weak"
+
             for pwd in report["weak_passwords"][:5]:
+                # Find the full item to pass to edit
+                item_id = pwd.get("id")
+                full_item = None
+                for item in self.vault.list_passwords():
+                    if item.get("id") == item_id:
+                        full_item = item
+                        break
+
                 item_row = ctk.CTkFrame(
                     weak_section,
                     fg_color=COLORS["bg_hover"],
                     corner_radius=RAD["sm"],
+                    cursor="hand2",
                 )
                 item_row.pack(fill="x", padx=SP["lg"], pady=(0, SP["xs"]))
 
                 item_content = ctk.CTkFrame(item_row, fg_color="transparent")
                 item_content.pack(fill="x", padx=SP["md"], pady=SP["sm"])
-
-                # Red accent bar on the left for weak passwords
-                accent_bar = ctk.CTkFrame(
-                    item_content,
-                    width=3,
-                    height=20,
-                    corner_radius=2,
-                    fg_color=COLORS["danger"],
-                )
-                accent_bar.pack(side="left", padx=(0, SP["sm"]))
-                accent_bar.pack_propagate(False)
-
-                # Warning icon
-                ctk.CTkLabel(
-                    item_content,
-                    text="⚠",
-                    font=FONT["small"],
-                    text_color=COLORS["danger"],
-                ).pack(side="left", padx=(0, SP["xs"]))
 
                 ctk.CTkLabel(
                     item_content,
@@ -2785,12 +2802,27 @@ class LockBoxUI(LoginViewMixin):
                     text_color=COLORS["text_primary"],
                 ).pack(side="left")
 
+                strength_label = get_strength_label(pwd["score"])
                 ctk.CTkLabel(
                     item_content,
-                    text=f"Strength: {pwd['score']}%",
+                    text=strength_label,
                     font=FONT["small"],
-                    text_color=COLORS["danger"],
+                    text_color=COLORS["text_muted"],
                 ).pack(side="right")
+
+                # Make entire row clickable
+                def make_click_handler(fi=full_item):
+                    def handler(event=None):
+                        if fi:
+                            self.show_edit_password(fi, focus_password=True)
+
+                    return handler
+
+                click_handler = make_click_handler(full_item)
+                item_row.bind("<Button-1>", click_handler)
+                item_content.bind("<Button-1>", click_handler)
+                for child in item_content.winfo_children():
+                    child.bind("<Button-1>", click_handler)
 
             if weak_count > 5:
                 ctk.CTkLabel(
@@ -2917,6 +2949,116 @@ class LockBoxUI(LoginViewMixin):
                     old_section, height=SP["sm"], fg_color="transparent"
                 ).pack()
 
+        # Breached Passwords Section (only shown if scan has been run and breaches found)
+        if hasattr(self, "_breach_scan_results") and self._breach_scan_results.get(
+            "breached"
+        ):
+            breached_list = self._breach_scan_results["breached"]
+            breach_section = ctk.CTkFrame(
+                content_container,
+                fg_color=COLORS["bg_card"],
+                corner_radius=RAD["md"],
+                border_width=1,
+                border_color=COLORS["border"],
+            )
+            breach_section.pack(fill="x", pady=(0, SP["sm"]))
+
+            breach_header = ctk.CTkFrame(breach_section, fg_color="transparent")
+            breach_header.pack(fill="x", padx=SP["lg"], pady=SP["md"])
+
+            ctk.CTkLabel(
+                breach_header,
+                text=f"🔓 Breached Passwords ({len(breached_list)})",
+                font=FONT["h3"],
+                text_color=COLORS["text_secondary"],
+            ).pack(side="left")
+
+            for breach_item in breached_list[:5]:
+                item_id = breach_item.get("id")
+                full_item = None
+                for item in self.vault.list_passwords():
+                    if item.get("id") == item_id:
+                        full_item = item
+                        break
+
+                item_row = ctk.CTkFrame(
+                    breach_section,
+                    fg_color=COLORS["bg_hover"],
+                    corner_radius=RAD["sm"],
+                    cursor="hand2",
+                )
+                item_row.pack(fill="x", padx=SP["lg"], pady=(0, SP["xs"]))
+
+                item_content = ctk.CTkFrame(item_row, fg_color="transparent")
+                item_content.pack(fill="x", padx=SP["md"], pady=SP["sm"])
+
+                # Breach warning icon
+                ctk.CTkLabel(
+                    item_content,
+                    text="⚠",
+                    font=FONT["small"],
+                    text_color=COLORS["text_muted"],
+                ).pack(side="left", padx=(0, SP["xs"]))
+
+                ctk.CTkLabel(
+                    item_content,
+                    text=breach_item["title"],
+                    font=FONT["body"],
+                    text_color=COLORS["text_primary"],
+                ).pack(side="left")
+
+                # Change Password button
+                if full_item:
+                    ctk.CTkButton(
+                        item_content,
+                        text="Change Password",
+                        width=120,
+                        height=28,
+                        font=FONT["small"],
+                        fg_color="transparent",
+                        hover_color=COLORS["bg_secondary"],
+                        text_color=COLORS["accent"],
+                        border_width=1,
+                        border_color=COLORS["border"],
+                        corner_radius=RAD["sm"],
+                        command=lambda fi=full_item: self._edit_breached_password(fi),
+                    ).pack(side="right", padx=(SP["sm"], 0))
+
+                ctk.CTkLabel(
+                    item_content,
+                    text="Found in a known data breach",
+                    font=FONT["small"],
+                    text_color=COLORS["text_muted"],
+                ).pack(side="right")
+
+                # Make row clickable
+                def make_click_handler(fi=full_item):
+                    def handler(event=None):
+                        if fi:
+                            self._edit_breached_password(fi)
+
+                    return handler
+
+                if full_item:
+                    click_handler = make_click_handler(full_item)
+                    item_row.bind("<Button-1>", click_handler)
+                    item_content.bind("<Button-1>", click_handler)
+                    for child in item_content.winfo_children():
+                        if not isinstance(child, ctk.CTkButton):
+                            child.bind("<Button-1>", click_handler)
+
+            if len(breached_list) > 5:
+                ctk.CTkLabel(
+                    breach_section,
+                    text=f"+ {len(breached_list) - 5} more",
+                    font=FONT["small"],
+                    text_color=COLORS["text_muted"],
+                ).pack(anchor="w", padx=SP["lg"], pady=(SP["xs"], SP["md"]))
+            else:
+                ctk.CTkFrame(
+                    breach_section, height=SP["sm"], fg_color="transparent"
+                ).pack()
+
         # Security Recommendations
         rec_section = ctk.CTkFrame(
             content_container,
@@ -2943,7 +3085,7 @@ class LockBoxUI(LoginViewMixin):
                 (
                     "⚠️",
                     f"Update {weak_count} weak password(s) with stronger alternatives",
-                    COLORS["danger"],
+                    COLORS["text_secondary"],
                 )
             )
         if reused_count > 0:
@@ -2951,7 +3093,7 @@ class LockBoxUI(LoginViewMixin):
                 (
                     "🔄",
                     f"Change {reused_count} reused password(s) to unique ones",
-                    COLORS["warning"],
+                    COLORS["text_secondary"],
                 )
             )
         if old_count > 0:
@@ -2959,15 +3101,15 @@ class LockBoxUI(LoginViewMixin):
                 (
                     "📅",
                     f"Refresh {old_count} password(s) older than 1 year",
-                    COLORS["warning"],
+                    COLORS["text_secondary"],
                 )
             )
         if not tips:
             tips.append(
                 (
-                    "✅",
-                    "Your password security is excellent! Keep it up.",
-                    COLORS["success"],
+                    "✓",
+                    "No security issues detected.",
+                    COLORS["text_muted"],
                 )
             )
 
@@ -2989,7 +3131,129 @@ class LockBoxUI(LoginViewMixin):
                 text_color=color,
             ).pack(side="left")
 
-        ctk.CTkFrame(rec_section, height=SP["sm"], fg_color="transparent").pack()
+        # Data Breach Scan section
+        breach_scan_frame = ctk.CTkFrame(rec_section, fg_color="transparent")
+        breach_scan_frame.pack(fill="x", padx=SP["lg"], pady=(SP["md"], SP["sm"]))
+
+        ctk.CTkButton(
+            breach_scan_frame,
+            text="Scan for Data Breaches",
+            width=180,
+            height=36,
+            font=FONT["button"],
+            fg_color=COLORS["bg_secondary"],
+            hover_color=COLORS["bg_hover"],
+            text_color=COLORS["text_primary"],
+            border_width=1,
+            border_color=COLORS["border"],
+            corner_radius=RAD["sm"],
+            command=self._run_breach_scan,
+        ).pack(side="left")
+
+        # Show scan status if currently scanning
+        if hasattr(self, "_breach_scan_status"):
+            ctk.CTkLabel(
+                breach_scan_frame,
+                text=self._breach_scan_status,
+                font=FONT["small"],
+                text_color=COLORS["text_muted"],
+            ).pack(side="left", padx=(SP["md"], 0))
+
+        ctk.CTkLabel(
+            rec_section,
+            text="Checks passwords against known breach databases. Passwords are never sent.",
+            font=FONT["small"],
+            text_color=COLORS["text_muted"],
+        ).pack(anchor="w", padx=SP["lg"], pady=(0, SP["md"]))
+
+    def _run_breach_scan(self):
+        """Run breach scan with subtle loading state"""
+        from app.services.breach_service import scan_all_passwords
+        import threading
+
+        # Set scanning status
+        self._breach_scan_status = "Scanning..."
+        self.display_items()
+
+        def scan_thread():
+            try:
+                results = scan_all_passwords(self.vault)
+                self._breach_scan_results = results
+
+                # Update status based on results
+                if results["breached"]:
+                    self._breach_scan_status = (
+                        f"{len(results['breached'])} breached password(s) found"
+                    )
+                else:
+                    self._breach_scan_status = "No breached passwords found."
+
+            except Exception as e:
+                self._breach_scan_status = "Scan failed. Try again later."
+                self._breach_scan_results = None
+
+            # Refresh UI on main thread
+            self.app.after(0, self.display_items)
+
+        thread = threading.Thread(target=scan_thread, daemon=True)
+        thread.start()
+
+    def _edit_breached_password(self, item):
+        """Edit a breached password and remove from breached list after save"""
+
+        def on_save():
+            # Remove this item from breached results
+            if hasattr(self, "_breach_scan_results") and self._breach_scan_results:
+                self._breach_scan_results["breached"] = [
+                    b
+                    for b in self._breach_scan_results["breached"]
+                    if b.get("id") != item.get("id")
+                ]
+                # Update status message
+                if not self._breach_scan_results["breached"]:
+                    self._breach_scan_status = "No breached passwords found."
+            self.display_items()
+
+        self.show_edit_password(item, focus_password=True, on_save_callback=on_save)
+
+    def _fix_weak_passwords_flow(self, weak_passwords):
+        """Guide user through fixing weak passwords one by one"""
+        if not weak_passwords:
+            self.display_items()  # Refresh to show updated state
+            return
+
+        # Store the list of weak passwords to fix
+        self._weak_passwords_queue = list(weak_passwords)
+        self._fix_next_weak_password()
+
+    def _fix_next_weak_password(self):
+        """Open the next weak password for editing"""
+        if not hasattr(self, "_weak_passwords_queue") or not self._weak_passwords_queue:
+            # All done, refresh the view
+            self.display_items()
+            return
+
+        # Get the next weak password
+        pwd = self._weak_passwords_queue.pop(0)
+        item_id = pwd.get("id")
+
+        # Find the full item
+        full_item = None
+        for item in self.vault.list_passwords():
+            if item.get("id") == item_id:
+                full_item = item
+                break
+
+        if full_item:
+            # Open edit dialog with callback to continue flow
+            self.show_edit_password(
+                full_item,
+                focus_password=True,
+                on_save_callback=self._fix_next_weak_password,
+            )
+        else:
+            # Item not found, move to next
+            self._fix_next_weak_password()
 
     def scan_all_passwords_for_breaches(self):
         """Scan all passwords for breaches"""
@@ -3043,7 +3307,7 @@ class LockBoxUI(LoginViewMixin):
         ctk.CTkButton(dlg, text="Close", command=dlg.destroy).pack(pady=20)
 
     def display_bulk_delete(self):
-        """Display bulk delete manager with professional design"""
+        """Display bulk delete manager with minimal design"""
         for widget in self.items_container.winfo_children():
             widget.destroy()
         if not hasattr(self, "bulk_selected"):
@@ -3053,27 +3317,24 @@ class LockBoxUI(LoginViewMixin):
 
         # Fixed header with filter controls
         fixed_header = ctk.CTkFrame(self.items_container, fg_color="transparent")
-        fixed_header.pack(fill="x", pady=(0, SP["md"]))
+        fixed_header.pack(fill="x", pady=(0, SP["sm"]))
 
         # Control bar with filters and delete button
         control_bar = ctk.CTkFrame(
             fixed_header,
-            fg_color=COLORS["bg_card"],
-            corner_radius=RAD["md"],
-            border_width=1,
-            border_color=COLORS["border"],
+            fg_color="transparent",
         )
-        control_bar.pack(fill="x", pady=(0, SP["sm"]))
+        control_bar.pack(fill="x", pady=(0, SP["xs"]))
 
         control_content = ctk.CTkFrame(control_bar, fg_color="transparent")
-        control_content.pack(fill="x", padx=SP["lg"], pady=SP["md"])
+        control_content.pack(fill="x")
 
         # Filter label
         ctk.CTkLabel(
             control_content,
             text="Filter:",
-            font=FONT["body"],
-            text_color=COLORS["text_secondary"],
+            font=FONT["small"],
+            text_color=COLORS["text_muted"],
         ).pack(side="left", padx=(0, SP["sm"]))
 
         self.filter_options = [
@@ -3094,13 +3355,10 @@ class LockBoxUI(LoginViewMixin):
             for cat, btn in self.category_pill_buttons.items():
                 is_active = cat == category
                 btn.configure(
-                    fg_color=COLORS["accent"] if is_active else "transparent",
+                    fg_color=COLORS["bg_secondary"] if is_active else "transparent",
                     text_color=(
-                        COLORS["text_primary"]
-                        if is_active
-                        else COLORS["text_secondary"]
+                        COLORS["text_primary"] if is_active else COLORS["text_muted"]
                     ),
-                    border_color=(COLORS["accent"] if is_active else COLORS["border"]),
                 )
             if hasattr(self, "_bulk_scroll_frame"):
                 for widget in self._bulk_scroll_frame.winfo_children():
@@ -3112,30 +3370,28 @@ class LockBoxUI(LoginViewMixin):
             btn = ctk.CTkButton(
                 control_content,
                 text=label,
-                width=80,
-                height=CTL["h"] - 8,
+                width=70,
+                height=28,
                 font=FONT["small"],
-                fg_color=COLORS["accent"] if is_current else "transparent",
-                hover_color=COLORS["accent_hover"],
+                fg_color=COLORS["bg_secondary"] if is_current else "transparent",
+                hover_color=COLORS["bg_hover"],
                 text_color=(
-                    COLORS["text_primary"] if is_current else COLORS["text_secondary"]
+                    COLORS["text_primary"] if is_current else COLORS["text_muted"]
                 ),
-                corner_radius=RAD["lg"],
-                border_width=1,
-                border_color=COLORS["accent"] if is_current else COLORS["border"],
+                corner_radius=RAD["sm"],
+                border_width=0,
                 command=lambda c=label: switch_filter(c),
             )
-            btn.pack(side="left", padx=SP["xs"] // 2)
+            btn.pack(side="left", padx=2)
             self.category_pill_buttons[label] = btn
 
         def delete_selected():
             if not self.bulk_selected:
-                messagebox.showinfo("No Selection", "Please select items to delete")
                 return
             count = len(self.bulk_selected)
             if not messagebox.askyesno(
-                "Confirm Bulk Delete",
-                f"Delete {count} item{'s' if count != 1 else ''}?\n\n⚠️ Cannot be undone!",
+                "Confirm Delete",
+                f"Delete {count} item{'s' if count != 1 else ''}?\n\nThis cannot be undone.",
             ):
                 return
             deleted = 0
@@ -3157,35 +3413,51 @@ class LockBoxUI(LoginViewMixin):
                     deleted += 1
                 except Exception as e:
                     print(f"Delete failed {checkbox_id}: {e}")
-            messagebox.showinfo("Success", f"✅ Deleted {deleted} items!")
             self.bulk_selected = []
             if hasattr(self, "_bulk_scroll_frame"):
                 for widget in self._bulk_scroll_frame.winfo_children():
                     widget.destroy()
                 self.reload_bulk_items_content()
 
-        ctk.CTkButton(
+        # Delete button - disabled by default, store reference to update later
+        self._bulk_delete_btn = ctk.CTkButton(
             control_content,
-            text="🗑️ Delete Selected",
-            width=160,
-            height=CTL["h"] - 4,
-            font=FONT["button"],
-            fg_color=COLORS["danger"],
-            hover_color="#dc2626",
-            corner_radius=RAD["md"],
+            text="Delete Selected",
+            width=120,
+            height=28,
+            font=FONT["small"],
+            fg_color=COLORS["bg_secondary"],
+            hover_color=COLORS["bg_secondary"],
+            text_color=COLORS["text_muted"],
+            corner_radius=RAD["sm"],
             command=delete_selected,
-        ).pack(side="right")
-
-        # Select all bar
-        select_all_frame = ctk.CTkFrame(
-            fixed_header,
-            fg_color=COLORS["bg_card"],
-            corner_radius=RAD["md"],
-            border_width=1,
-            border_color=COLORS["border"],
+            state="disabled",
         )
-        select_all_frame.pack(fill="x", pady=(0, SP["sm"]))
-        self._select_all_frame = select_all_frame
+        self._bulk_delete_btn.pack(side="right")
+
+        # Select All button
+        self._bulk_select_all_btn = ctk.CTkButton(
+            control_content,
+            text="Select All",
+            width=80,
+            height=28,
+            font=FONT["small"],
+            fg_color="transparent",
+            hover_color=COLORS["bg_hover"],
+            text_color=COLORS["text_secondary"],
+            corner_radius=RAD["sm"],
+            command=lambda: self._toggle_select_all(),
+        )
+        self._bulk_select_all_btn.pack(side="right", padx=(0, SP["sm"]))
+
+        # Selection count label
+        self._bulk_selection_label = ctk.CTkLabel(
+            fixed_header,
+            text="",
+            font=FONT["small"],
+            text_color=COLORS["text_muted"],
+        )
+        self._bulk_selection_label.pack(anchor="w", pady=(SP["xs"], 0))
 
         # Scrollable items container
         self._bulk_scroll_frame = ctk.CTkScrollableFrame(
@@ -3195,216 +3467,197 @@ class LockBoxUI(LoginViewMixin):
         self.reload_bulk_items_content()
 
     def reload_bulk_items_content(self):
-        """Reload items in bulk delete view with professional design"""
+        """Reload items in bulk delete view with minimal design"""
         for widget in self._bulk_scroll_frame.winfo_children():
             widget.destroy()
-        for widget in self._select_all_frame.winfo_children():
-            widget.destroy()
-
-        # Define hover effect function
-        def bind_hover_recursive(widget, default_color, hover_color):
-            """Bind hover effect to widget and all its children"""
-
-            def on_enter(e):
-                try:
-                    widget.configure(border_color=hover_color)
-                except:
-                    pass
-
-            def on_leave(e):
-                try:
-                    widget.configure(border_color=default_color)
-                except:
-                    pass
-
-            widget.bind("<Enter>", on_enter, add="+")
-            widget.bind("<Leave>", on_leave, add="+")
-            for child in widget.winfo_children():
-                child.bind("<Enter>", on_enter, add="+")
-                child.bind("<Leave>", on_leave, add="+")
 
         all_items = []
         filter_choice = self.bulk_category_filter
         if filter_choice in ["All Items", "Passwords"]:
             for item in self.vault.list_passwords():
+                item_id = f"passwords:{item['id']}"
                 all_items.append(
                     {
                         "category": "passwords",
-                        "label": "🔒 Password",
+                        "type_label": "Password",
                         "item": item,
-                        "id": f"passwords:{item['id']}",
-                        "var": tk.BooleanVar(value=False),
+                        "id": item_id,
+                        "var": tk.BooleanVar(value=item_id in self.bulk_selected),
                     }
                 )
         if filter_choice in ["All Items", "API Keys"]:
             for item in self.vault.list_api_keys():
+                item_id = f"api_keys:{item['id']}"
                 all_items.append(
                     {
                         "category": "api_keys",
-                        "label": "🔑 API Key",
+                        "type_label": "API Key",
                         "item": item,
-                        "id": f"api_keys:{item['id']}",
-                        "var": tk.BooleanVar(value=False),
+                        "id": item_id,
+                        "var": tk.BooleanVar(value=item_id in self.bulk_selected),
                     }
                 )
         if filter_choice in ["All Items", "Notes"]:
             for item in self.vault.list_notes():
+                item_id = f"notes:{item['id']}"
                 all_items.append(
                     {
                         "category": "notes",
-                        "label": "📝 Note",
+                        "type_label": "Note",
                         "item": item,
-                        "id": f"notes:{item['id']}",
-                        "var": tk.BooleanVar(value=False),
+                        "id": item_id,
+                        "var": tk.BooleanVar(value=item_id in self.bulk_selected),
                     }
                 )
         if filter_choice in ["All Items", "SSH Keys"]:
             for item in self.vault.list_ssh_keys():
+                item_id = f"ssh_keys:{item['id']}"
                 all_items.append(
                     {
                         "category": "ssh_keys",
-                        "label": "🗝️ SSH Key",
+                        "type_label": "SSH Key",
                         "item": item,
-                        "id": f"ssh_keys:{item['id']}",
-                        "var": tk.BooleanVar(value=False),
+                        "id": item_id,
+                        "var": tk.BooleanVar(value=item_id in self.bulk_selected),
                     }
                 )
         if filter_choice in ["All Items", "Files"]:
             for item in self.vault.list_files():
+                item_id = f"files:{item['id']}"
                 all_items.append(
                     {
                         "category": "files",
-                        "label": "📄 File",
+                        "type_label": "File",
                         "item": item,
-                        "id": f"files:{item['id']}",
-                        "var": tk.BooleanVar(value=False),
+                        "id": item_id,
+                        "var": tk.BooleanVar(value=item_id in self.bulk_selected),
                     }
                 )
         if filter_choice in ["All Items", "Folders"]:
             for item in self.vault.list_encrypted_folders():
+                item_id = f"encrypted_folders:{item['id']}"
                 all_items.append(
                     {
                         "category": "encrypted_folders",
-                        "label": "📁 Folder",
+                        "type_label": "Folder",
                         "item": item,
-                        "id": f"encrypted_folders:{item['id']}",
-                        "var": tk.BooleanVar(value=False),
+                        "id": item_id,
+                        "var": tk.BooleanVar(value=item_id in self.bulk_selected),
+                    }
+                )
+        if filter_choice in ["All Items", "2FA/TOTP"]:
+            for item in self.vault.list_totp():
+                item_id = f"totp:{item['id']}"
+                all_items.append(
+                    {
+                        "category": "totp",
+                        "type_label": "2FA Code",
+                        "item": item,
+                        "id": item_id,
+                        "var": tk.BooleanVar(value=item_id in self.bulk_selected),
                     }
                 )
         all_items.sort(key=lambda x: x["item"].get("created", ""), reverse=True)
 
-        if not all_items:
-            empty_frame = ctk.CTkFrame(
-                self._bulk_scroll_frame,
-                fg_color=COLORS["bg_card"],
-                corner_radius=RAD["md"],
-                border_width=1,
-                border_color=COLORS["border"],
-            )
-            empty_frame.pack(fill="x", pady=SP["xl"])
+        # Store all_items reference for select all
+        self._bulk_all_items = all_items
 
-            ctk.CTkLabel(
-                empty_frame,
-                text=f"No {filter_choice.lower()} found",
-                font=FONT["h3"],
-                text_color=COLORS["text_secondary"],
-            ).pack(pady=SP["2xl"])
+        # Update selection label and row highlights
+        def update_selection_ui():
+            count = len(self.bulk_selected)
+            total = len(all_items)
+            if count == 0:
+                self._bulk_selection_label.configure(text=f"{total} items")
+                self._bulk_select_all_btn.configure(text="Select All")
+                # Disable delete button
+                self._bulk_delete_btn.configure(
+                    state="disabled",
+                    fg_color=COLORS["bg_secondary"],
+                    hover_color=COLORS["bg_secondary"],
+                    text_color=COLORS["text_muted"],
+                )
+            else:
+                self._bulk_selection_label.configure(
+                    text=f"{count} of {total} items selected"
+                )
+                self._bulk_select_all_btn.configure(
+                    text="Deselect All" if count == total else "Select All"
+                )
+                # Enable delete button with red color
+                self._bulk_delete_btn.configure(
+                    state="normal",
+                    fg_color=COLORS["danger"],
+                    hover_color="#dc2626",
+                    text_color="white",
+                )
+            # Update row backgrounds
+            for m in all_items:
+                if hasattr(m, "_row_widget") and m["_row_widget"]:
+                    try:
+                        if m["id"] in self.bulk_selected:
+                            m["_row_widget"].configure(fg_color=COLORS["bg_secondary"])
+                        else:
+                            m["_row_widget"].configure(fg_color=COLORS["bg_card"])
+                    except:
+                        pass
+
+        if not all_items:
+            self._bulk_selection_label.configure(text="No items found")
             return
 
-        select_all_var = tk.BooleanVar(value=False)
-        select_all_checkbox = None
-
-        def toggle_all():
-            if select_all_var.get():
-                self.bulk_selected = [item["id"] for item in all_items]
-                for item in all_items:
-                    item["var"].set(True)
-            else:
-                self.bulk_selected = []
-                for item in all_items:
-                    item["var"].set(False)
-            update_selection_count()
-
-        def update_selection_count():
-            count = len(self.bulk_selected)
-            if count == 0:
-                text = f"Select All ({len(all_items)} items)"
-            elif count == len(all_items):
-                text = f"✓ All Selected ({count} items)"
-            else:
-                text = f"Selected {count} of {len(all_items)} items"
-            try:
-                if select_all_checkbox and select_all_checkbox.winfo_exists():
-                    select_all_checkbox.configure(text=text)
-            except:
-                pass
-
-        select_all_content = ctk.CTkFrame(
-            self._select_all_frame, fg_color="transparent"
-        )
-        select_all_content.pack(fill="x", padx=SP["lg"], pady=SP["sm"])
-
-        select_all_checkbox = ctk.CTkCheckBox(
-            select_all_content,
-            text=f"Select All ({len(all_items)} items)",
-            variable=select_all_var,
-            font=FONT["body"],
-            command=toggle_all,
-            checkbox_width=22,
-            checkbox_height=22,
-        )
-        select_all_checkbox.pack(side="left")
+        # Initial UI update
+        update_selection_ui()
 
         for meta in all_items:
             item = meta["item"]
             cat = meta["category"]
 
-            # Professional card with border
-            card = ctk.CTkFrame(
+            # Simple row with subtle highlight when selected
+            is_selected = meta["id"] in self.bulk_selected
+            row = ctk.CTkFrame(
                 self._bulk_scroll_frame,
-                fg_color=COLORS["bg_card"],
-                corner_radius=RAD["md"],
-                border_width=1,
-                border_color=COLORS["border"],
+                fg_color=COLORS["bg_secondary"] if is_selected else COLORS["bg_card"],
+                corner_radius=RAD["sm"],
+                height=44,
             )
-            card.pack(fill="x", pady=(0, SP["sm"]))
+            row.pack(fill="x", pady=2)
+            row.pack_propagate(False)
+            meta["_row_widget"] = row
 
-            card_content = ctk.CTkFrame(card, fg_color="transparent")
-            card_content.pack(fill="x", padx=SP["lg"], pady=SP["md"])
+            row_content = ctk.CTkFrame(row, fg_color="transparent")
+            row_content.pack(fill="both", expand=True, padx=SP["md"], pady=SP["xs"])
 
-            # Checkbox column
-            def on_check(cid=meta["id"], var=meta["var"]):
+            # Checkbox
+            def on_check(cid=meta["id"], var=meta["var"], row_ref=row):
                 if var.get():
                     if cid not in self.bulk_selected:
                         self.bulk_selected.append(cid)
                 else:
                     if cid in self.bulk_selected:
                         self.bulk_selected.remove(cid)
-                update_selection_count()
+                update_selection_ui()
 
             ctk.CTkCheckBox(
-                card_content,
+                row_content,
                 text="",
                 variable=meta["var"],
                 command=on_check,
-                checkbox_width=22,
-                checkbox_height=22,
-                width=22,
-            ).pack(side="left", padx=(0, SP["md"]))
+                checkbox_width=18,
+                checkbox_height=18,
+                width=18,
+            ).pack(side="left", padx=(0, SP["sm"]))
 
-            # Category badge
+            # Type label (slightly more visible)
             ctk.CTkLabel(
-                card_content,
-                text=meta["label"],
+                row_content,
+                text=meta["type_label"],
                 font=FONT["small"],
-                text_color="white",
-                fg_color=COLORS["accent"],
-                corner_radius=RAD["sm"],
-                padx=SP["sm"],
-                pady=SP["xs"],
-            ).pack(side="left", padx=(0, SP["md"]))
+                text_color=COLORS["text_secondary"],
+                width=70,
+                anchor="w",
+            ).pack(side="left", padx=(0, SP["xs"]))
 
-            # Title
+            # Item name
             name = (
                 item.get("title")
                 or item.get("service")
@@ -3414,56 +3667,49 @@ class LockBoxUI(LoginViewMixin):
                 or "Untitled"
             )
             ctk.CTkLabel(
-                card_content,
+                row_content,
                 text=name,
-                font=(
-                    "Segoe UI",
-                    FONT["body"].cget("size") if hasattr(FONT["body"], "cget") else 14,
-                    "bold",
-                ),
+                font=FONT["body"],
                 text_color=COLORS["text_primary"],
             ).pack(side="left")
 
-            # Metadata on the right
-            if cat == "passwords":
+            # Subtle metadata on the right (closer, more subtle)
+            if cat == "passwords" and item.get("username"):
                 ctk.CTkLabel(
-                    card_content,
-                    text=f"👤 {item.get('username', 'N/A')}",
+                    row_content,
+                    text=item.get("username", ""),
                     font=FONT["small"],
-                    text_color=COLORS["text_secondary"],
-                ).pack(side="right", padx=SP["sm"])
-            elif cat == "files":
-                size_kb = item.get("size", 0) / 1024
-                ctk.CTkLabel(
-                    card_content,
-                    text=f"💾 {size_kb:.1f} KB",
-                    font=FONT["small"],
-                    text_color=COLORS["text_secondary"],
-                ).pack(side="right", padx=SP["sm"])
-            elif cat == "api_keys":
-                ctk.CTkLabel(
-                    card_content,
-                    text=f"📝 {item.get('service', 'N/A')}",
-                    font=FONT["small"],
-                    text_color=COLORS["text_secondary"],
-                ).pack(side="right", padx=SP["sm"])
-            elif cat == "ssh_keys":
-                ctk.CTkLabel(
-                    card_content,
-                    text=f"🔑 {item.get('name', 'N/A')}",
-                    font=FONT["small"],
-                    text_color=COLORS["text_secondary"],
-                ).pack(side="right", padx=SP["sm"])
+                    text_color=COLORS["text_muted"],
+                ).pack(side="right", padx=(SP["sm"], 0))
             elif cat == "encrypted_folders":
                 ctk.CTkLabel(
-                    card_content,
-                    text=f"📊 {item.get('file_count', 0)} files",
+                    row_content,
+                    text=f"{item.get('file_count', 0)} files",
                     font=FONT["small"],
-                    text_color=COLORS["text_secondary"],
-                ).pack(side="right", padx=SP["sm"])
+                    text_color=COLORS["text_muted"],
+                ).pack(side="right", padx=(SP["sm"], 0))
 
-            # Add hover effect
-            bind_hover_recursive(card, COLORS["border"], COLORS["accent"])
+    def _toggle_select_all(self):
+        """Toggle select all / deselect all"""
+        if not hasattr(self, "_bulk_all_items"):
+            return
+
+        all_items = self._bulk_all_items
+        all_selected = len(self.bulk_selected) == len(all_items)
+
+        if all_selected:
+            # Deselect all
+            self.bulk_selected = []
+            for meta in all_items:
+                meta["var"].set(False)
+        else:
+            # Select all
+            self.bulk_selected = [item["id"] for item in all_items]
+            for meta in all_items:
+                meta["var"].set(True)
+
+        # Update UI
+        self.reload_bulk_items_content()
 
     def show_add_dialog(self):
         """Show add dialog based on category"""
@@ -4278,7 +4524,7 @@ class LockBoxUI(LoginViewMixin):
             command=save,
         ).pack(pady=20)
 
-    def show_edit_password(self, item, focus_password=False):
+    def show_edit_password(self, item, focus_password=False, on_save_callback=None):
         """Dialog to edit password"""
         dialog = self.create_dialog("Edit Password", 500, 680)
 
@@ -4593,7 +4839,11 @@ class LockBoxUI(LoginViewMixin):
                 self.vault.update_password(item["id"], **updates)
                 dialog.destroy()
                 self.display_items()
-                messagebox.showinfo("Success", "Password updated successfully!")
+                # Call the callback if provided (for fix weak passwords flow)
+                if on_save_callback:
+                    self.app.after(100, on_save_callback)
+                else:
+                    messagebox.showinfo("Success", "Password updated successfully!")
             except Exception as e:
                 status.configure(
                     text=f"❌ Error: {str(e)}", text_color=COLORS["danger"]

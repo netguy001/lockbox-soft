@@ -120,6 +120,11 @@ class LockBoxUI(LoginViewMixin):
 
         self.show_login()
         self.setup_keyboard_shortcuts()
+        # Ensure we clear any display affinity on normal app exit
+        try:
+            self.app.protocol("WM_DELETE_WINDOW", self._on_app_exit)
+        except Exception:
+            pass
 
         self.filter_options = [
             "All Items",
@@ -518,6 +523,31 @@ class LockBoxUI(LoginViewMixin):
 
     def auto_lock(self):
         """Auto lock vault after inactivity"""
+        # Cancel timers to ensure no callbacks run after lock
+        if getattr(self, "auto_lock_timer", None):
+            try:
+                self.app.after_cancel(self.auto_lock_timer)
+            except Exception:
+                pass
+            self.auto_lock_timer = None
+
+        if hasattr(self, "_search_timer") and getattr(self, "_search_timer", None):
+            try:
+                self.app.after_cancel(self._search_timer)
+            except Exception:
+                pass
+            try:
+                delattr(self, "_search_timer")
+            except Exception:
+                pass
+
+        if getattr(self, "clipboard_timer", None):
+            try:
+                self.app.after_cancel(self.clipboard_timer)
+            except Exception:
+                pass
+            self.clipboard_timer = None
+
         self._vault_unlocked = False
         self._remove_blur()
         self.security.end_session()
@@ -1578,6 +1608,12 @@ class LockBoxUI(LoginViewMixin):
 
     def display_items(self):
         """Display items for current category"""
+        # Guard: do nothing if vault is locked
+        try:
+            if hasattr(self, "vault") and getattr(self.vault, "is_locked", True):
+                return
+        except Exception:
+            pass
         # Hide container during rebuild to prevent flicker
         if hasattr(self, "items_container"):
             try:
@@ -6493,6 +6529,30 @@ class LockBoxUI(LoginViewMixin):
     def lock_vault(self):
         """Lock vault and return to login"""
         self.reset_activity()
+        # Cancel timers to prevent callbacks after lock
+        if getattr(self, "auto_lock_timer", None):
+            try:
+                self.app.after_cancel(self.auto_lock_timer)
+            except Exception:
+                pass
+            self.auto_lock_timer = None
+
+        if hasattr(self, "_search_timer") and getattr(self, "_search_timer", None):
+            try:
+                self.app.after_cancel(self._search_timer)
+            except Exception:
+                pass
+            try:
+                delattr(self, "_search_timer")
+            except Exception:
+                pass
+
+        if getattr(self, "clipboard_timer", None):
+            try:
+                self.app.after_cancel(self.clipboard_timer)
+            except Exception:
+                pass
+            self.clipboard_timer = None
 
         # Mark vault as locked
         self._vault_unlocked = False
@@ -6537,6 +6597,11 @@ class LockBoxUI(LoginViewMixin):
                         pass
             except Exception:
                 pass
+            # Also attempt to apply to all top-level windows for this process (best-effort)
+            try:
+                self._apply_affinity_to_all_windows()
+            except Exception:
+                pass
         except Exception as e:
             print(f"Screenshot protection not available: {e}")
 
@@ -6579,10 +6644,24 @@ class LockBoxUI(LoginViewMixin):
                 hwnd, WDA_EXCLUDEFROMCAPTURE
             )
             if result == 0:
+                # Fallback to monitor affinity; log if it also fails
                 WDA_MONITOR = 0x00000001
-                ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, WDA_MONITOR)
+                try:
+                    res2 = ctypes.windll.user32.SetWindowDisplayAffinity(
+                        hwnd, WDA_MONITOR
+                    )
+                    if res2 == 0:
+                        print(
+                            f"Warning: SetWindowDisplayAffinity fallback failed for hwnd={hwnd}"
+                        )
+                except Exception:
+                    print(
+                        f"Warning: SetWindowDisplayAffinity raised during fallback for hwnd={hwnd}"
+                    )
         except Exception:
-            pass
+            print(
+                "Warning: SetWindowDisplayAffinity not available or failed for a window"
+            )
 
     def _clear_affinity_for_window(self, window):
         """Clear display affinity for a specific window (best-effort)."""
@@ -6627,9 +6706,20 @@ class LockBoxUI(LoginViewMixin):
                         hwnd, WDA_EXCLUDEFROMCAPTURE
                     )
                     if res == 0:
-                        ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, WDA_MONITOR)
+                        try:
+                            res2 = ctypes.windll.user32.SetWindowDisplayAffinity(
+                                hwnd, WDA_MONITOR
+                            )
+                            if res2 == 0:
+                                print(
+                                    f"Warning: SetWindowDisplayAffinity fallback failed for hwnd={hwnd}"
+                                )
+                        except Exception:
+                            print(
+                                f"Warning: SetWindowDisplayAffinity fallback raised for hwnd={hwnd}"
+                            )
                 except Exception:
-                    pass
+                    print(f"Warning: SetWindowDisplayAffinity failed for hwnd={hwnd}")
         except Exception:
             pass
 
@@ -6659,9 +6749,27 @@ class LockBoxUI(LoginViewMixin):
                 try:
                     ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0)
                 except Exception:
-                    pass
+                    print(
+                        f"Warning: Clearing SetWindowDisplayAffinity failed for hwnd={hwnd}"
+                    )
         except Exception:
             pass
+
+    def _on_app_exit(self):
+        """Handler for app exit to clear display affinity before quitting."""
+        try:
+            try:
+                self._disable_screenshot_protection()
+            except Exception:
+                pass
+        finally:
+            try:
+                self.app.destroy()
+            except Exception:
+                try:
+                    sys.exit(0)
+                except Exception:
+                    pass
 
     def check_password_breach(self, item):
         """Check if password has been breached"""

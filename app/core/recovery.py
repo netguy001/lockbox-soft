@@ -93,10 +93,34 @@ class RecoverySystem:
                 }
             )
 
+        # Atomic, best-effort write for recovery metadata. On failure, disable recovery feature
+        from app.core.metadata import get_metadata_manager
+
+        metadata = get_metadata_manager()
+        if not metadata.is_enabled("recovery"):
+            return
+
         self.recovery_file.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(self.recovery_file, "w") as f:
-            json.dump(recovery_data, f)
+        try:
+            dirpath = self.recovery_file.parent
+            tmp = dirpath / (self.recovery_file.name + ".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(recovery_data, f)
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except Exception:
+                    pass
+            os.replace(str(tmp), str(self.recovery_file))
+        except (PermissionError, IOError, OSError) as e:
+            metadata.disable("recovery", f"Could not write recovery metadata: {e}")
+            return
+        except Exception as e:
+            metadata.disable(
+                "recovery", f"Unexpected error writing recovery metadata: {e}"
+            )
+            return
 
     def verify_recovery_phrase(self, phrase: str) -> bool:
         """

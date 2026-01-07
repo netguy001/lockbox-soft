@@ -128,20 +128,47 @@ class FileProtection:
             "security_hash": self.calculate_file_hash(self.data_dir / "security.json"),
         }
 
+        # Use atomic write to avoid partial writes; disable integrity feature on failure
+        from app.core.metadata import get_metadata_manager
+
+        metadata = get_metadata_manager()
+        if not metadata.is_enabled("integrity"):
+            return
+
         self.integrity_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.integrity_file, "w") as f:
-            json.dump(integrity_data, f)
 
-        # Hide integrity file
-        if os.name == "nt":
-            try:
-                import ctypes
+        try:
+            dirpath = self.integrity_file.parent
+            tmp = dirpath / (self.integrity_file.name + ".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(integrity_data, f)
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except Exception:
+                    pass
+            # atomic replace
+            os.replace(str(tmp), str(self.integrity_file))
 
-                ctypes.windll.kernel32.SetFileAttributesW(
-                    str(self.integrity_file), 0x02
-                )
-            except:
-                pass
+            # Hide integrity file (best-effort)
+            if os.name == "nt":
+                try:
+                    import ctypes
+
+                    ctypes.windll.kernel32.SetFileAttributesW(
+                        str(self.integrity_file), 0x02
+                    )
+                except Exception:
+                    print("Warning: Could not hide integrity file; continuing")
+
+        except (PermissionError, IOError, OSError) as e:
+            metadata.disable("integrity", f"Could not write integrity metadata: {e}")
+            return
+        except Exception as e:
+            metadata.disable(
+                "integrity", f"Unexpected error writing integrity metadata: {e}"
+            )
+            return
 
     def check_integrity(self, vault_path: Path) -> dict:
         """Check if files have been tampered with"""

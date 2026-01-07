@@ -618,7 +618,13 @@ class LoginViewMixin(RecoveryDialogMixin):
         save_vault(salt + encrypted)
 
         recovery = RecoverySystem(VAULT_FILE)
-        recovery.save_recovery_hash(phrase, vault_key=key)
+        try:
+            recovery.save_recovery_hash(phrase, vault_key=key)
+        except Exception:
+            # Recovery metadata failures should not prevent account creation
+            print(
+                "Warning: Failed to save recovery metadata during account creation; continuing"
+            )
 
         self._clear_setup_lock()
         self.setup_state = None

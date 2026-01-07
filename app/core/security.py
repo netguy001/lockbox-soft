@@ -81,6 +81,15 @@ class SecurityManager:
         If both primary and fallback writes fail, we log and continue without
         raising to avoid permanently locking the user out.
         """
+        # If metadata manager has disabled security writes, skip saving
+        try:
+            from app.core.metadata import get_metadata_manager
+
+            if not get_metadata_manager().is_enabled("security"):
+                return
+        except Exception:
+            pass
+
         # attempt primary path first
         primary = self._original_path
         if self._atomic_write(primary, self.data):
@@ -101,10 +110,20 @@ class SecurityManager:
             )
             return
 
-        # both writes failed — log and continue to avoid self-lockout
-        print(
-            f"[LockBox] WARNING: Unable to persist security settings to {primary} or {fallback}."
-        )
+        # both writes failed — disable security metadata feature and record a one-time warning
+        try:
+            from app.core.metadata import get_metadata_manager
+
+            metadata = get_metadata_manager()
+            metadata.disable(
+                "security",
+                f"Unable to persist security settings to {primary} or {fallback}. Login lockout will be disabled",
+            )
+        except Exception:
+            # fallback to logging if metadata manager unavailable
+            print(
+                f"[LockBox] WARNING: Unable to persist security settings to {primary} or {fallback}."
+            )
 
     def is_locked_out(self):
         """Check if locked out due to too many failed attempts"""

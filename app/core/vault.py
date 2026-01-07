@@ -367,6 +367,7 @@ class Vault:
         if not backup_file.exists():
             raise ValueError("Backup file not found")
 
+        # Validate backup by attempting to decrypt it with provided password
         try:
             with open(backup_file, "rb") as f:
                 salt = f.read(16)
@@ -378,8 +379,51 @@ class Vault:
         except Exception:
             raise ValueError("Invalid backup file or password")
 
-        shutil.copy2(backup_file, self.path)
-        self.unlock(password)
+        # Back up current live vault before replacing
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        orig_backup = None
+        try:
+            if self.path.exists() and self.path.stat().st_size > 0:
+                orig_backup = (
+                    self.path.parent / f"{self.path.name}.pre_restore_{timestamp}.vault"
+                )
+                shutil.copy2(self.path, orig_backup)
+
+            # Write to a temporary file then atomically replace the live vault
+            temp_target = self.path.with_suffix(self.path.suffix + ".restore_tmp")
+            shutil.copy2(backup_file, temp_target)
+            os.replace(temp_target, self.path)
+
+        except Exception as e:
+            # Attempt to restore original if we have one
+            if orig_backup and orig_backup.exists():
+                try:
+                    os.replace(orig_backup, self.path)
+                except Exception:
+                    pass
+            raise
+
+        # Attempt to unlock the newly-restored vault to validate runtime decrypt
+        try:
+            self.unlock(password)
+        except Exception as e:
+            # Restore original vault on failure
+            if orig_backup and orig_backup.exists():
+                try:
+                    os.replace(orig_backup, self.path)
+                except Exception:
+                    pass
+            raise ValueError(
+                "Restored vault failed to unlock; original vault restored"
+            ) from e
+
+        # Cleanup original backup if restore succeeded
+        if orig_backup and orig_backup.exists():
+            try:
+                orig_backup.unlink()
+            except Exception:
+                pass
+
         return True
 
     def export_json(self, export_path: str):

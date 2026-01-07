@@ -60,6 +60,10 @@ class SecurityOrchestrator:
         self.session_manager = SessionManager(AUTO_LOCK_MINUTES)
         self.login_security = LoginSecurityManager(DATA_DIR / "security.json")
 
+        # Runtime metadata-enabled flags (can be disabled if writes fail)
+        self.integrity_enabled = ENABLE_INTEGRITY_CHECKS
+        self.recovery_enabled = True
+        self.security_metadata_enabled = True
         # File lock handles
         self.vault_lock_handle = None
         self.security_warnings: List[str] = []
@@ -112,7 +116,24 @@ class SecurityOrchestrator:
         # Check for security threats
         threats = self.check_security_threats()
         results["warnings"] = threats
+        # Include any metadata manager warnings and update runtime flags
+        try:
+            from app.core.metadata import get_metadata_manager
 
+            md = get_metadata_manager()
+            for w in md.get_warnings():
+                if w not in results["warnings"]:
+                    results["warnings"].append(w)
+
+            # Reflect disabled features
+            if not md.is_enabled("integrity"):
+                self.integrity_enabled = False
+            if not md.is_enabled("recovery"):
+                self.recovery_enabled = False
+            if not md.is_enabled("security"):
+                self.security_metadata_enabled = False
+        except Exception:
+            pass
         return results
 
     def check_security_threats(self) -> List[str]:
@@ -143,14 +164,14 @@ class SecurityOrchestrator:
 
     def check_file_integrity(self) -> Dict:
         """Check if vault files have been tampered with"""
-        if not ENABLE_INTEGRITY_CHECKS:
+        if not self.integrity_enabled:
             return {"tampered": False, "message": "Integrity checks disabled"}
 
         return self.file_protection.check_integrity(self.vault_file)
 
     def update_integrity_hashes(self):
         """Update integrity hashes after vault save"""
-        if ENABLE_INTEGRITY_CHECKS:
+        if self.integrity_enabled:
             self.file_protection.save_integrity_data(self.vault_file)
 
     # ─────────────────────────────────────────────────────────────────────

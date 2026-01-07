@@ -38,6 +38,7 @@ FONT = {
     "small": ("Segoe UI", 12),
     "button": ("Segoe UI Semibold", 13),
     "nav": ("Segoe UI", 14),
+    "nav_icon": ("Segoe UI", 24),
     "icon": ("Segoe UI", 18),
     "mono": ("Consolas", 12),
 }
@@ -208,13 +209,14 @@ class LockBoxUI(LoginViewMixin):
         )
 
     def create_dialog(self, title, width, height):
-        """Create a dialog window"""
+        """Create a dialog window with theme-aware styling"""
         dialog = ctk.CTkToplevel(self.app)
         dialog.title(title)
         dialog.geometry(f"{width}x{height}")
         dialog.transient(self.app)
         dialog.grab_set()
         dialog.minsize(width, height)
+        dialog.configure(fg_color=COLORS["bg_primary"])
 
         dialog.update_idletasks()
         x = (dialog.winfo_screenwidth() - width) // 2
@@ -222,6 +224,47 @@ class LockBoxUI(LoginViewMixin):
         dialog.geometry(f"+{x}+{y}")
 
         return dialog
+
+    def create_placeholder_textbox(self, parent, placeholder, width=400, height=100):
+        """Create a textbox with placeholder behavior - text disappears on focus"""
+        textbox = ctk.CTkTextbox(
+            parent,
+            width=width,
+            height=height,
+            fg_color=COLORS["bg_card"],
+            text_color=COLORS["text_primary"],
+            border_color=COLORS["border"],
+            border_width=1,
+        )
+        textbox._placeholder = placeholder
+        textbox._has_placeholder = True
+
+        # Insert placeholder with muted color
+        textbox.insert("1.0", placeholder)
+        textbox.configure(text_color=COLORS["text_muted"])
+
+        def on_focus_in(e):
+            if textbox._has_placeholder:
+                textbox.delete("1.0", "end")
+                textbox.configure(text_color=COLORS["text_primary"])
+                textbox._has_placeholder = False
+
+        def on_focus_out(e):
+            if textbox.get("1.0", "end").strip() == "":
+                textbox.insert("1.0", textbox._placeholder)
+                textbox.configure(text_color=COLORS["text_muted"])
+                textbox._has_placeholder = True
+
+        textbox.bind("<FocusIn>", on_focus_in)
+        textbox.bind("<FocusOut>", on_focus_out)
+
+        return textbox
+
+    def get_textbox_content(self, textbox):
+        """Get content from a placeholder textbox, returning empty string if placeholder is shown"""
+        if hasattr(textbox, "_has_placeholder") and textbox._has_placeholder:
+            return ""
+        return textbox.get("1.0", "end").strip()
 
     def run(self):
         """Start the application"""
@@ -333,28 +376,67 @@ class LockBoxUI(LoginViewMixin):
         self.category_buttons = {}
         for label, cat, icon in categories:
             is_active = cat == self.current_category
-            # Use accent color directly for active items for better visibility
-            btn = ctk.CTkButton(
+            # Create button container frame for compound icon+text
+            btn_frame = ctk.CTkFrame(
                 nav_frame,
-                text=f"  {icon}    {label}",
-                width=SIDEBAR_WIDTH - SP["md"] * 2,
-                height=CTL["nav"],
-                font=FONT["nav"],
                 fg_color=COLORS["accent"] if is_active else "transparent",
-                hover_color=COLORS["bg_hover"],
+                corner_radius=RAD["md"],
+                height=CTL["nav"],
+                width=SIDEBAR_WIDTH - SP["md"] * 2,
+            )
+            btn_frame.pack(pady=3, fill="x")
+            btn_frame.pack_propagate(False)
+
+            # Icon label (larger font)
+            icon_lbl = ctk.CTkLabel(
+                btn_frame,
+                text=icon,
+                font=FONT["nav_icon"],
+                text_color="#ffffff" if is_active else COLORS["text_secondary"],
+                width=40,
+            )
+            icon_lbl.pack(side="left", padx=(SP["xs"], SP["xs"]))
+
+            # Text label
+            text_lbl = ctk.CTkLabel(
+                btn_frame,
+                text=label,
+                font=FONT["nav"],
                 text_color="#ffffff" if is_active else COLORS["text_secondary"],
                 anchor="w",
-                corner_radius=RAD["md"],
-                command=lambda c=cat: self.switch_category(c),
             )
-            btn.pack(pady=3)
-            btn._full_text = f"  {icon}    {label}"
-            btn._icon_text = icon
-            self.category_buttons[cat] = btn
+            text_lbl.pack(side="left", fill="x", expand=True)
 
-        # Divider
-        ctk.CTkFrame(sidebar, fg_color=COLORS["border"], height=1).pack(
-            fill="x", padx=SP["lg"], pady=SP["lg"]
+            # Make entire frame clickable
+            def make_click_handler(category, frame, icon_l, text_l):
+                def on_enter(e):
+                    if category != self.current_category:
+                        frame.configure(fg_color=COLORS["bg_hover"])
+
+                def on_leave(e):
+                    if category != self.current_category:
+                        frame.configure(fg_color="transparent")
+
+                def on_click(e):
+                    self.switch_category(category)
+
+                frame.bind("<Enter>", on_enter)
+                frame.bind("<Leave>", on_leave)
+                frame.bind("<Button-1>", on_click)
+                icon_l.bind("<Button-1>", on_click)
+                text_l.bind("<Button-1>", on_click)
+
+            make_click_handler(cat, btn_frame, icon_lbl, text_lbl)
+
+            btn_frame._full_text = f"  {icon}    {label}"
+            btn_frame._icon_text = icon
+            btn_frame._icon_label = icon_lbl
+            btn_frame._text_label = text_lbl
+            self.category_buttons[cat] = btn_frame
+
+        # Divider before Tools
+        ctk.CTkFrame(sidebar, fg_color=COLORS["border"], height=2).pack(
+            fill="x", padx=SP["md"], pady=(SP["lg"], SP["md"])
         )
 
         # Tools section
@@ -373,27 +455,71 @@ class LockBoxUI(LoginViewMixin):
         ]
         for label, cat, icon in tool_items:
             is_active = cat == self.current_category
-            # Use accent color directly for active items for better visibility
-            btn = ctk.CTkButton(
+            # Create button container frame for compound icon+text
+            btn_frame = ctk.CTkFrame(
                 sidebar,
-                text=f"  {icon}    {label}",
-                width=SIDEBAR_WIDTH - SP["md"] * 2,
-                height=CTL["nav"],
-                font=FONT["nav"],
                 fg_color=COLORS["accent"] if is_active else "transparent",
-                hover_color=COLORS["bg_hover"],
+                corner_radius=RAD["md"],
+                height=CTL["nav"],
+                width=SIDEBAR_WIDTH - SP["md"] * 2,
+            )
+            btn_frame.pack(pady=3, padx=SP["md"], fill="x")
+            btn_frame.pack_propagate(False)
+
+            # Icon label (larger font)
+            icon_lbl = ctk.CTkLabel(
+                btn_frame,
+                text=icon,
+                font=FONT["nav_icon"],
+                text_color="#ffffff" if is_active else COLORS["text_secondary"],
+                width=40,
+            )
+            icon_lbl.pack(side="left", padx=(SP["xs"], SP["xs"]))
+
+            # Text label
+            text_lbl = ctk.CTkLabel(
+                btn_frame,
+                text=label,
+                font=FONT["nav"],
                 text_color="#ffffff" if is_active else COLORS["text_secondary"],
                 anchor="w",
-                corner_radius=RAD["md"],
-                command=lambda c=cat: self.switch_category(c),
             )
-            btn.pack(pady=3, padx=SP["md"])
-            btn._full_text = f"  {icon}    {label}"
-            btn._icon_text = icon
-            self.category_buttons[cat] = btn
+            text_lbl.pack(side="left", fill="x", expand=True)
+
+            # Make entire frame clickable
+            def make_click_handler(category, frame, icon_l, text_l):
+                def on_enter(e):
+                    if category != self.current_category:
+                        frame.configure(fg_color=COLORS["bg_hover"])
+
+                def on_leave(e):
+                    if category != self.current_category:
+                        frame.configure(fg_color="transparent")
+
+                def on_click(e):
+                    self.switch_category(category)
+
+                frame.bind("<Enter>", on_enter)
+                frame.bind("<Leave>", on_leave)
+                frame.bind("<Button-1>", on_click)
+                icon_l.bind("<Button-1>", on_click)
+                text_l.bind("<Button-1>", on_click)
+
+            make_click_handler(cat, btn_frame, icon_lbl, text_lbl)
+
+            btn_frame._full_text = f"  {icon}    {label}"
+            btn_frame._icon_text = icon
+            btn_frame._icon_label = icon_lbl
+            btn_frame._text_label = text_lbl
+            self.category_buttons[cat] = btn_frame
 
         # Spacer
         ctk.CTkFrame(sidebar, fg_color="transparent").pack(fill="both", expand=True)
+
+        # Divider before bottom actions
+        ctk.CTkFrame(sidebar, fg_color=COLORS["border"], height=2).pack(
+            fill="x", padx=SP["md"], pady=(SP["sm"], SP["md"])
+        )
 
         # Bottom actions
         self.utility_buttons = []
@@ -404,23 +530,61 @@ class LockBoxUI(LoginViewMixin):
             ("Settings", self.show_settings_page, "⚙"),
         ]
         for label, cmd, icon in bottom_actions:
-            btn = ctk.CTkButton(
+            # Create button container frame for compound icon+text
+            btn_frame = ctk.CTkFrame(
                 sidebar,
-                text=f"  {icon}    {label}",
-                width=SIDEBAR_WIDTH - SP["md"] * 2,
-                height=CTL["nav"],
-                font=FONT["nav"],
                 fg_color="transparent",
-                hover_color=COLORS["bg_hover"],
+                corner_radius=RAD["md"],
+                height=CTL["nav"],
+                width=SIDEBAR_WIDTH - SP["md"] * 2,
+            )
+            btn_frame.pack(pady=3, padx=SP["md"], fill="x")
+            btn_frame.pack_propagate(False)
+
+            # Icon label (larger font)
+            icon_lbl = ctk.CTkLabel(
+                btn_frame,
+                text=icon,
+                font=FONT["nav_icon"],
+                text_color=COLORS["text_secondary"],
+                width=40,
+            )
+            icon_lbl.pack(side="left", padx=(SP["xs"], SP["xs"]))
+
+            # Text label
+            text_lbl = ctk.CTkLabel(
+                btn_frame,
+                text=label,
+                font=FONT["nav"],
                 text_color=COLORS["text_secondary"],
                 anchor="w",
-                corner_radius=RAD["md"],
-                command=cmd,
             )
-            btn.pack(pady=3, padx=SP["md"])
-            btn._full_text = f"  {icon}    {label}"
-            btn._icon_text = icon
-            self.utility_buttons.append(btn)
+            text_lbl.pack(side="left", fill="x", expand=True)
+
+            # Make entire frame clickable with hover effect
+            def make_util_click_handler(command, frame):
+                def on_enter(e):
+                    frame.configure(fg_color=COLORS["bg_hover"])
+
+                def on_leave(e):
+                    frame.configure(fg_color="transparent")
+
+                def on_click(e):
+                    command()
+
+                frame.bind("<Enter>", on_enter)
+                frame.bind("<Leave>", on_leave)
+                frame.bind("<Button-1>", on_click)
+                for child in frame.winfo_children():
+                    child.bind("<Button-1>", on_click)
+
+            make_util_click_handler(cmd, btn_frame)
+
+            btn_frame._full_text = f"  {icon}    {label}"
+            btn_frame._icon_text = icon
+            btn_frame._icon_label = icon_lbl
+            btn_frame._text_label = text_lbl
+            self.utility_buttons.append(btn_frame)
 
         # Lock button
         lock_btn = ctk.CTkButton(
@@ -435,7 +599,7 @@ class LockBoxUI(LoginViewMixin):
             corner_radius=RAD["md"],
             command=self.lock_vault,
         )
-        lock_btn.pack(pady=(SP["md"], SP["xl"]), padx=SP["lg"])
+        lock_btn.pack(pady=(SP["sm"], SP["md"]), padx=SP["lg"])
         lock_btn._full_text = "Lock Vault"
         lock_btn._icon_text = "🔒"
         self.utility_buttons.append(lock_btn)
@@ -495,15 +659,20 @@ class LockBoxUI(LoginViewMixin):
 
         self.current_category = category
 
-        # Update buttons
-        for c, btn in self.category_buttons.items():
+        # Update buttons (compound structure with icon and text labels)
+        for c, btn_frame in self.category_buttons.items():
             is_active = c == self.current_category
-            btn.configure(
+            btn_frame.configure(
                 fg_color=COLORS["accent"] if is_active else "transparent",
-                text_color=(
-                    "#ffffff" if is_active else COLORS["text_secondary"]
-                ),
             )
+            if hasattr(btn_frame, "_icon_label"):
+                btn_frame._icon_label.configure(
+                    text_color="#ffffff" if is_active else COLORS["text_secondary"]
+                )
+            if hasattr(btn_frame, "_text_label"):
+                btn_frame._text_label.configure(
+                    text_color="#ffffff" if is_active else COLORS["text_secondary"]
+                )
 
         self.app.update_idletasks()
         self.display_category()
@@ -642,6 +811,9 @@ class LockBoxUI(LoginViewMixin):
                 fg_color=COLORS["bg_card"],
                 button_color=COLORS["bg_hover"],
                 button_hover_color=COLORS["accent"],
+                text_color=COLORS["text_primary"],
+                dropdown_text_color=COLORS["text_primary"],
+                dropdown_fg_color=COLORS["bg_card"],
                 corner_radius=RAD["md"],
                 command=self.change_sort,
             )
@@ -682,7 +854,15 @@ class LockBoxUI(LoginViewMixin):
         """Collapse/expand sidebar manually."""
         self.sidebar_collapsed = not self.sidebar_collapsed
         self.sidebar_hover_peek = False
+        # Disable button briefly to prevent rapid clicks
+        if hasattr(self, "sidebar_toggle_btn"):
+            self.sidebar_toggle_btn.configure(state="disabled")
         self._apply_sidebar_state()
+        # Re-enable after animation settles
+        if hasattr(self, "sidebar_toggle_btn"):
+            self.app.after(
+                150, lambda: self.sidebar_toggle_btn.configure(state="normal")
+            )
 
     def _on_sidebar_enter(self, _event=None):
         """Hover peek disabled; keep sidebar stable."""
@@ -699,11 +879,14 @@ class LockBoxUI(LoginViewMixin):
 
         collapsed = self.sidebar_collapsed and not peek
         width = SIDEBAR_COLLAPSED_WIDTH if collapsed else SIDEBAR_WIDTH
+
+        # Update sidebar width
         try:
             self.sidebar.configure(width=width)
         except Exception:
             pass
 
+        # Update toggle button arrow
         if hasattr(self, "sidebar_toggle_btn"):
             self.sidebar_toggle_btn.configure(text="▶" if collapsed else "◀")
 
@@ -715,33 +898,63 @@ class LockBoxUI(LoginViewMixin):
         if hasattr(self, "tools_label"):
             self.tools_label.configure(text="" if collapsed else "TOOLS")
 
-        # Update category buttons
+        # Update category buttons (compound structure with icon + text labels)
         for btn in getattr(self, "category_buttons", {}).values():
-            if not hasattr(btn, "_full_text"):
-                continue
-            btn.configure(
-                text=btn._icon_text if collapsed else btn._full_text,
-                anchor="center" if collapsed else "w",
-                width=(
-                    SIDEBAR_COLLAPSED_WIDTH - SP["md"] * 2
-                    if collapsed
-                    else SIDEBAR_WIDTH - SP["md"] * 2
-                ),
-            )
+            if hasattr(btn, "_icon_label") and hasattr(btn, "_text_label"):
+                # Compound button structure
+                btn.configure(
+                    width=(
+                        SIDEBAR_COLLAPSED_WIDTH - SP["md"] * 2
+                        if collapsed
+                        else SIDEBAR_WIDTH - SP["md"] * 2
+                    )
+                )
+                if collapsed:
+                    btn._text_label.pack_forget()
+                    btn._icon_label.pack_configure(padx=(SP["sm"], SP["sm"]))
+                else:
+                    btn._icon_label.pack_configure(padx=(SP["xs"], SP["xs"]))
+                    btn._text_label.pack(side="left", fill="x", expand=True)
+            elif hasattr(btn, "_full_text"):
+                # Legacy button structure
+                btn.configure(
+                    text=btn._icon_text if collapsed else btn._full_text,
+                    anchor="center" if collapsed else "w",
+                    width=(
+                        SIDEBAR_COLLAPSED_WIDTH - SP["md"] * 2
+                        if collapsed
+                        else SIDEBAR_WIDTH - SP["md"] * 2
+                    ),
+                )
 
-        # Update utility buttons
+        # Update utility buttons (compound structure)
         for btn in getattr(self, "utility_buttons", []):
-            if not hasattr(btn, "_full_text"):
-                continue
-            btn.configure(
-                text=btn._icon_text if collapsed else btn._full_text,
-                anchor="center" if collapsed else "w",
-                width=(
-                    SIDEBAR_COLLAPSED_WIDTH - SP["md"] * 2
-                    if collapsed
-                    else SIDEBAR_WIDTH - SP["md"] * 2
-                ),
-            )
+            if hasattr(btn, "_icon_label") and hasattr(btn, "_text_label"):
+                # Compound button structure
+                btn.configure(
+                    width=(
+                        SIDEBAR_COLLAPSED_WIDTH - SP["md"] * 2
+                        if collapsed
+                        else SIDEBAR_WIDTH - SP["md"] * 2
+                    )
+                )
+                if collapsed:
+                    btn._text_label.pack_forget()
+                    btn._icon_label.pack_configure(padx=(SP["sm"], SP["sm"]))
+                else:
+                    btn._icon_label.pack_configure(padx=(SP["xs"], SP["xs"]))
+                    btn._text_label.pack(side="left", fill="x", expand=True)
+            elif hasattr(btn, "_full_text"):
+                # Legacy button (like Lock Vault)
+                btn.configure(
+                    text=btn._icon_text if collapsed else btn._full_text,
+                    anchor="center" if collapsed else "w",
+                    width=(
+                        SIDEBAR_COLLAPSED_WIDTH - SP["lg"] * 2
+                        if collapsed
+                        else SIDEBAR_WIDTH - SP["lg"] * 2
+                    ),
+                )
 
     def change_sort(self, choice):
         """Handle sort option change"""
@@ -3012,7 +3225,7 @@ class LockBoxUI(LoginViewMixin):
         """Dialog to edit SSH key"""
         dialog = self.create_dialog("Edit SSH Key", 600, 550)
 
-        ctk.CTkLabel(dialog, text="Edit SSH Key", font=("Segoe UI", 20, "bold"), text_color=COLORS["text_primary"]).pack(
+        ctk.CTkLabel(dialog, text="Edit SSH Key", font=("Segoe UI", 20, "bold")).pack(
             pady=20
         )
 
@@ -3070,7 +3283,7 @@ class LockBoxUI(LoginViewMixin):
         """Dialog to edit SSH key"""
         dialog = self.create_dialog("Edit SSH Key", 600, 550)
 
-        ctk.CTkLabel(dialog, text="Edit SSH Key", font=("Segoe UI", 20, "bold"), text_color=COLORS["text_primary"]).pack(
+        ctk.CTkLabel(dialog, text="Edit SSH Key", font=("Segoe UI", 20, "bold")).pack(
             pady=20
         )
 
@@ -3181,7 +3394,7 @@ class LockBoxUI(LoginViewMixin):
         """Dialog to edit API key"""
         dialog = self.create_dialog("Edit API Key", 500, 450)
 
-        ctk.CTkLabel(dialog, text="Edit API Key", font=("Segoe UI", 20, "bold"), text_color=COLORS["text_primary"]).pack(
+        ctk.CTkLabel(dialog, text="Edit API Key", font=("Segoe UI", 20, "bold")).pack(
             pady=20
         )
 
@@ -3241,7 +3454,9 @@ class LockBoxUI(LoginViewMixin):
         """Dialog to add new password"""
         dialog = self.create_dialog("Add Password", 500, 680)
 
-        ctk.CTkLabel(dialog, text="Add New Password", font=("Segoe UI", 20, "bold"), text_color=COLORS["text_primary"]).pack(pady=20)
+        ctk.CTkLabel(
+            dialog, text="Add New Password", font=("Segoe UI", 20, "bold")
+        ).pack(pady=20)
 
         title_entry = ctk.CTkEntry(
             dialog, width=400, height=40, placeholder_text="Title (e.g., Gmail)"
@@ -3283,7 +3498,7 @@ class LockBoxUI(LoginViewMixin):
             width=40,
             height=40,
             font=("Segoe UI", 16),
-            fg_color=COLORS["bg_hover"],  # FIXED: Now matches other buttons
+            fg_color=COLORS["bg_hover"],
             hover_color=COLORS["border"],
             corner_radius=6,
             command=toggle_password_visibility,
@@ -3344,7 +3559,7 @@ class LockBoxUI(LoginViewMixin):
                 width=40,
                 height=40,
                 font=("Segoe UI", 16),
-                fg_color=COLORS["bg_hover"],  # FIXED: Now matches other buttons
+                fg_color=COLORS["bg_hover"],
                 hover_color=COLORS["border"],
                 corner_radius=6,
                 command=toggle_preview,
@@ -3524,8 +3739,9 @@ class LockBoxUI(LoginViewMixin):
         )
         url_entry.pack(pady=10)
 
-        notes_entry = ctk.CTkTextbox(dialog, width=400, height=100)
-        notes_entry.insert("1.0", "Notes (optional)")
+        notes_entry = self.create_placeholder_textbox(
+            dialog, "Notes (optional)", width=400, height=100
+        )
         notes_entry.pack(pady=10)
 
         status = ctk.CTkLabel(dialog, text="", font=("Segoe UI", 12))
@@ -3536,7 +3752,7 @@ class LockBoxUI(LoginViewMixin):
             username = username_entry.get().strip()
             password = password_entry.get()
             url = url_entry.get().strip()
-            notes = notes_entry.get("1.0", "end").strip()
+            notes = self.get_textbox_content(notes_entry)
 
             if not title or not password:
                 status.configure(
@@ -3583,8 +3799,9 @@ class LockBoxUI(LoginViewMixin):
         )
         key_entry.pack(pady=10)
 
-        desc_entry = ctk.CTkTextbox(dialog, width=400, height=100)
-        desc_entry.insert("1.0", "Description (optional)")
+        desc_entry = self.create_placeholder_textbox(
+            dialog, "Description (optional)", width=400, height=100
+        )
         desc_entry.pack(pady=10)
 
         status = ctk.CTkLabel(dialog, text="", font=("Segoe UI", 12))
@@ -3593,7 +3810,7 @@ class LockBoxUI(LoginViewMixin):
         def save():
             service = service_entry.get().strip()
             key = key_entry.get().strip()
-            desc = desc_entry.get("1.0", "end").strip()
+            desc = self.get_textbox_content(desc_entry)
 
             if not service or not key:
                 status.configure(
@@ -3676,7 +3893,7 @@ class LockBoxUI(LoginViewMixin):
         """Dialog to add SSH key"""
         dialog = self.create_dialog("Add SSH Key", 600, 550)
 
-        ctk.CTkLabel(dialog, text="Add SSH Key", font=("Segoe UI", 20, "bold"), text_color=COLORS["text_primary"]).pack(
+        ctk.CTkLabel(dialog, text="Add SSH Key", font=("Segoe UI", 20, "bold")).pack(
             pady=20
         )
 
@@ -3753,23 +3970,27 @@ class LockBoxUI(LoginViewMixin):
 
         dialog = self.create_dialog("Add Folder", 500, 400)
 
-        ctk.CTkLabel(dialog, text="Add Folder", font=("Segoe UI", 20, "bold"), text_color=COLORS["text_primary"]).pack(
+        ctk.CTkLabel(dialog, text="Add Folder", font=("Segoe UI", 20, "bold")).pack(
             pady=20
         )
 
         ctk.CTkLabel(
-            dialog, text=f"Selected: {Path(folder_path).name}", font=("Segoe UI", 12)
+            dialog,
+            text=f"Selected: {Path(folder_path).name}",
+            font=("Segoe UI", 12),
+            text_color=COLORS["text_secondary"],
         ).pack(pady=10)
 
-        desc_entry = ctk.CTkTextbox(dialog, width=400, height=100)
-        desc_entry.insert("1.0", "Description (optional)")
+        desc_entry = self.create_placeholder_textbox(
+            dialog, "Description (optional)", width=400, height=100
+        )
         desc_entry.pack(pady=10)
 
         status = ctk.CTkLabel(dialog, text="", font=("Segoe UI", 12))
         status.pack(pady=5)
 
         def save():
-            desc = desc_entry.get("1.0", "end").strip()
+            desc = self.get_textbox_content(desc_entry)
             status.configure(text="⏳ Adding folder...", text_color=COLORS["warning"])
             dialog.update()
 
@@ -3798,7 +4019,7 @@ class LockBoxUI(LoginViewMixin):
         """Dialog to edit password"""
         dialog = self.create_dialog("Edit Password", 500, 680)
 
-        ctk.CTkLabel(dialog, text="Edit Password", font=("Segoe UI", 20, "bold"), text_color=COLORS["text_primary"]).pack(
+        ctk.CTkLabel(dialog, text="Edit Password", font=("Segoe UI", 20, "bold")).pack(
             pady=20
         )
 
@@ -3839,7 +4060,7 @@ class LockBoxUI(LoginViewMixin):
             width=40,
             height=40,
             font=("Segoe UI", 16),
-            fg_color=COLORS["bg_hover"],  # FIXED: Now matches other buttons
+            fg_color=COLORS["bg_hover"],
             hover_color=COLORS["border"],
             corner_radius=6,
             command=toggle_password_visibility,
@@ -3900,7 +4121,7 @@ class LockBoxUI(LoginViewMixin):
                 width=40,
                 height=40,
                 font=("Segoe UI", 16),
-                fg_color=COLORS["bg_hover"],  # FIXED: Now matches other buttons
+                fg_color=COLORS["bg_hover"],
                 hover_color=COLORS["border"],
                 corner_radius=6,
                 command=toggle_preview,
@@ -4397,6 +4618,9 @@ class LockBoxUI(LoginViewMixin):
             for key, value in theme_colors.items():
                 COLORS[key] = value
 
+            # Regenerate accent_soft for the new theme
+            COLORS["accent_soft"] = self._soften_color(COLORS["accent"])
+
             # Also set customtkinter appearance mode
             ctk.set_appearance_mode(theme_name.lower())
 
@@ -4436,7 +4660,7 @@ class LockBoxUI(LoginViewMixin):
         bg_r = int(bg_hex[0:2], 16)
         bg_g = int(bg_hex[2:4], 16)
         bg_b = int(bg_hex[4:6], 16)
-        
+
         # For light themes (bright backgrounds), use more color, less background
         is_light = (bg_r + bg_g + bg_b) / 3 > 128
         if is_light:
@@ -4564,7 +4788,9 @@ class LockBoxUI(LoginViewMixin):
 
             # Determine border color based on theme (dark border for light theme)
             bg_hex = COLORS.get("bg_secondary", "#1e1e1e").lstrip("#")
-            is_light = (int(bg_hex[0:2], 16) + int(bg_hex[2:4], 16) + int(bg_hex[4:6], 16)) / 3 > 128
+            is_light = (
+                int(bg_hex[0:2], 16) + int(bg_hex[2:4], 16) + int(bg_hex[4:6], 16)
+            ) / 3 > 128
             border_color = "#333333" if is_light else "#ffffff"
 
             # Update button visuals to show selection
@@ -4581,7 +4807,9 @@ class LockBoxUI(LoginViewMixin):
 
         # Determine border color based on theme
         bg_hex = COLORS.get("bg_secondary", "#1e1e1e").lstrip("#")
-        is_light_theme = (int(bg_hex[0:2], 16) + int(bg_hex[2:4], 16) + int(bg_hex[4:6], 16)) / 3 > 128
+        is_light_theme = (
+            int(bg_hex[0:2], 16) + int(bg_hex[2:4], 16) + int(bg_hex[4:6], 16)
+        ) / 3 > 128
         selection_border = "#333333" if is_light_theme else "#ffffff"
 
         for color, name in accent_colors:
@@ -5207,7 +5435,7 @@ class LockBoxUI(LoginViewMixin):
                 anchor="w",
             ).pack(side="left")
 
-            ctk.CTkLabel(row, text=action, font=("Segoe UI", 12), anchor="w", text_color=COLORS["text_primary"]).pack(
+            ctk.CTkLabel(row, text=action, font=("Segoe UI", 12), anchor="w").pack(
                 side="left"
             )
 

@@ -81,7 +81,7 @@ class LockBoxUI(LoginViewMixin):
         except Exception as e:
             print(f"Warning: Could not set icon: {e}")
 
-        self.app.title("LockBox - Secure Vault")
+        self.app.title("LockBox - Private by default")
         self.app.geometry("1280x820")
         self.app.minsize(1100, 720)
 

@@ -50,7 +50,7 @@ class LoginViewMixin(RecoveryDialogMixin):
         login_box.pack_propagate(False)
 
         title_row = ctk.CTkFrame(login_box, fg_color="transparent")
-        title_row.pack(pady=(40, 8))
+        title_row.pack(pady=(40, 6))
 
         try:
             logo_paths = [
@@ -62,10 +62,10 @@ class LoginViewMixin(RecoveryDialogMixin):
                 if os.path.exists(logo_path):
                     logo_image = Image.open(logo_path).convert("RGBA")
                     self.logo_photo = ctk.CTkImage(
-                        light_image=logo_image, dark_image=logo_image, size=(60, 60)
+                        light_image=logo_image, dark_image=logo_image, size=(52, 52)
                     )
                     logo_label = ctk.CTkLabel(title_row, image=self.logo_photo, text="")
-                    logo_label.pack(side="left", padx=(0, 12))
+                    logo_label.pack(side="left", padx=(0, 2))
                     break
         except Exception as e:
             print(f"Warning: Could not load logo: {e}")
@@ -73,16 +73,16 @@ class LoginViewMixin(RecoveryDialogMixin):
         ctk.CTkLabel(
             title_row,
             text="LockBox",
-            font=("Segoe UI", 36, "bold"),
+            font=("Segoe UI", 34, "bold"),
             text_color=COLORS["accent"],
         ).pack(side="left")
 
         ctk.CTkLabel(
             login_box,
-            text="Secure Password Vault",
-            font=("Segoe UI", 14),
+            text="Private by default",
+            font=("Segoe UI", 13),
             text_color=COLORS["text_secondary"],
-        ).pack(pady=(0, 30))
+        ).pack(pady=(0, 28))
 
         pwd_placeholder = (
             "Enter PIN/Password" if has_vault else "Create PIN/Password (5+ chars)"
@@ -170,14 +170,9 @@ class LoginViewMixin(RecoveryDialogMixin):
         except Exception as e:
             print(f"Recovery check failed: {e}")
 
-        if not has_vault:
-            helper_text = "First time? Create your PIN/Password to get started"
-        else:
-            helper_text = "Enter your PIN/Password to unlock"
-
         ctk.CTkLabel(
             login_box,
-            text=helper_text,
+            text="Enter your PIN/Password to unlock",
             font=("Segoe UI", 11),
             text_color=COLORS["text_secondary"],
         ).pack(pady=(10, 0))
